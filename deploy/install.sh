@@ -41,8 +41,8 @@ BUILD="2026-05-09"
 
 # ─── Colors ───────────────────────────────────────────────────────
 if [ -t 1 ]; then
-    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'
-    BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; CYAN=$'\033[0;36m'
+    BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
 else
     RED=''; GREEN=''; YELLOW=''; CYAN=''; BOLD=''; DIM=''; RESET=''
 fi
@@ -105,16 +105,11 @@ require_systemd() {
 
 # ─── Download tarball + extract binary ───────────────────────────
 resolve_tarball_url() {
-    local arch="$1"
     if [ -n "${TARBALL_URL:-}" ]; then
         echo "${TARBALL_URL}"
         return
     fi
-    if [ "${RELEASE_TAG}" = "latest" ]; then
-        echo "https://github.com/${REPO}/releases/latest/download/${BIN_NAME}-${PLATFORM}.tar.gz"
-    else
-        echo "https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${BIN_NAME}-${PLATFORM}.tar.gz"
-    fi
+    echo "https://github.com/FxPool/texas-holdem-mp/releases/download/v${VERSION}/texas-holdem-server-linux-amd64.tar.gz"
 }
 
 download_to() {
