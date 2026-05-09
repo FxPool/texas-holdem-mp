@@ -377,12 +377,19 @@ install_server() {
     require_systemd
 
     if [ -z "${DOMAIN:-}" ]; then
-        echo ""
-        local DEFAULT_DOMAIN="www.example.com"
-        printf "  ${DIM}Domain must already point to this server's IP${RESET}\n"
-        prompt "Domain [${DEFAULT_DOMAIN}]: "
-        read -r DOMAIN < /dev/tty
-        DOMAIN="${DOMAIN:-$DEFAULT_DOMAIN}"
+        if [ -t 0 ]; then
+            echo ""
+            local DEFAULT_DOMAIN="www.example.com"
+            printf "  ${DIM}Domain must already point to this server's IP${RESET}\n"
+            prompt "Domain [${DEFAULT_DOMAIN}]: "
+            read -r DOMAIN < /dev/tty
+            DOMAIN="${DOMAIN:-$DEFAULT_DOMAIN}"
+        else
+            error "Domain is required in non-interactive mode"
+            error "Usage: curl ... | sudo DOMAIN=your.domain.com sh"
+            error "   or: sudo sh install.sh install --domain your.domain.com"
+            exit 1
+        fi
     fi
     info "Domain:    ${DOMAIN}"
     info "Platform:  ${PLATFORM}"
@@ -472,8 +479,13 @@ uninstall_server() {
     info "Removed sysctl + limits config"
 
     echo ""
-    prompt "Also remove environment file (${ENV_FILE}) and state (${DATA_DIR})? [y/N]: "
-    read -r RM_DATA < /dev/tty
+    if [ -t 0 ]; then
+        prompt "Also remove environment file (${ENV_FILE}) and state (${DATA_DIR})? [y/N]: "
+        read -r RM_DATA < /dev/tty
+    else
+        RM_DATA="n"
+        info "Non-interactive: preserving environment and state files"
+    fi
     case "$RM_DATA" in
         [yY]*)
             rm -f "$ENV_FILE"
@@ -639,7 +651,19 @@ case "$cmd" in
     logs)       detect_arch; svc_logs ;;
     status)     detect_arch; show_status ;;
     tune)       check_root; detect_arch; apply_tuning_only ;;
-    "")         main_menu ;;
+    "")
+        if [ -t 0 ]; then
+            main_menu
+        else
+            print_banner
+            check_root
+            detect_arch
+            info "Detected platform: ${BOLD}${PLATFORM}${RESET}"
+            info "Non-interactive mode — running install"
+            echo ""
+            install_server
+        fi
+        ;;
     -h|--help)
         cat <<EOF
 Texas Hold'em Server installer (v${VERSION})
