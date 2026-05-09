@@ -1,0 +1,14 @@
+<view class="pot">
+  <view class="chip-stack">
+    <view class="chip chip-1"></view>
+    <view class="chip chip-2"></view>
+    <view class="chip chip-3"></view>
+    <view class="chip chip-4"></view>
+    <view class="chip chip-5"></view>
+  </view>
+  <view class="pot-info">
+    <text class="pot-label">底池</text>
+    <text class="pot-amount">{{pot}}</text>
+    <text wx:if="{{currentBet > 0}}" class="pot-bet">当前注 {{currentBet}}</text>
+  </view>
+</view>

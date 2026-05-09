@@ -1,0 +1,153 @@
+.seat {
+  position: relative;
+  width: 150rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: opacity 0.2s ease;
+}
+
+.seat.status-folded {
+  opacity: 0.45;
+  filter: grayscale(0.7);
+}
+
+/* 手牌背面：在头像后方扇形夹角 */
+.holecards {
+  position: absolute;
+  top: -10rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: row;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.hc {
+  display: inline-block;
+}
+
+.hc-1 {
+  transform: translateX(20rpx) rotate(-12deg);
+}
+
+.hc-2 {
+  transform: translateX(-20rpx) rotate(12deg);
+}
+
+.avatar-wrap {
+  position: relative;
+  width: 100rpx;
+  height: 100rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+}
+
+.avatar {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #FFF6E0 0%, #FFD66B 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 4rpx solid rgba(255, 246, 224, 0.4);
+  box-shadow: 0 4rpx 10rpx rgba(0,0,0,0.25);
+}
+
+.seat.is-active .avatar {
+  border-color: #FFD66B;
+  box-shadow: 0 0 24rpx #FFD66B;
+}
+
+.avatar-emoji {
+  font-size: 52rpx;
+  line-height: 1;
+}
+
+.badge {
+  position: absolute;
+  bottom: -4rpx;
+  right: -4rpx;
+  min-width: 34rpx;
+  height: 34rpx;
+  padding: 0 8rpx;
+  border-radius: 17rpx;
+  background: #FFD66B;
+  color: #4A2E00;
+  font-size: 22rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2rpx 6rpx rgba(0,0,0,0.3);
+  z-index: 4;
+}
+
+.badge-sb { background: #6BB6FF; color: #fff; }
+.badge-bb { background: #FF6B7A; color: #fff; }
+
+.info {
+  margin-top: 6rpx;
+  background: rgba(20, 12, 40, 0.85);
+  border-radius: 24rpx;
+  padding: 6rpx 16rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 120rpx;
+  z-index: 3;
+}
+
+.nickname {
+  font-size: 22rpx;
+  color: #FFF6E0;
+  max-width: 110rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chips-row {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  margin-top: 2rpx;
+}
+
+.chips-icon { color: #FFD66B; font-size: 20rpx; }
+.chips-num { font-size: 24rpx; color: #FFD66B; font-weight: 700; }
+
+.state-tag {
+  position: absolute;
+  top: 36rpx;
+  left: -18rpx;
+  padding: 4rpx 10rpx;
+  border-radius: 12rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #fff;
+  z-index: 6;
+}
+
+.tag-fold { background: #6E6680; }
+.tag-allin { background: #FF6B7A; }
+.tag-think { background: #6BB6FF; }
+
+.bet-pill {
+  margin-top: 6rpx;
+  background: rgba(255, 214, 107, 0.18);
+  border: 2rpx solid #FFD66B;
+  border-radius: 20rpx;
+  padding: 2rpx 14rpx;
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  z-index: 3;
+}
+
+.bet-icon { color: #FFD66B; font-size: 18rpx; }
+.bet-num { font-size: 22rpx; color: #FFD66B; font-weight: 700; }

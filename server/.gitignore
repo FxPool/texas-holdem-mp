@@ -1,0 +1,7 @@
+# Build artifacts
+dist/
+texas-holdem-server
+texas-holdem-server-linux-amd64
+texas-holdem-server-linux-arm64
+*.test
+*.out

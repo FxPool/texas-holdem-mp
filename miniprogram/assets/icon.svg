@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 144" width="144" height="144">
+  <defs>
+    <radialGradient id="felt" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#9FDDB8"/>
+      <stop offset="60%" stop-color="#5BAB7E"/>
+      <stop offset="100%" stop-color="#3E8E5E"/>
+    </radialGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3A2566"/>
+      <stop offset="100%" stop-color="#1A2B5C"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFBEB"/>
+      <stop offset="100%" stop-color="#FFE9B8"/>
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- 圆角方形外底（深紫蓝渐变） -->
+  <rect width="144" height="144" rx="32" fill="url(#bg)"/>
+
+  <!-- 桌布大圆（即使被裁成圆形也能看见绿色） -->
+  <circle cx="72" cy="72" r="58" fill="url(#felt)"/>
+  <circle cx="72" cy="72" r="58" fill="none" stroke="#F4B6A0" stroke-width="3"/>
+  <circle cx="72" cy="72" r="54" fill="none" stroke="#FFD66B" stroke-width="0.8" stroke-opacity="0.7"/>
+
+  <!-- 后面：红心 K（左下倾） -->
+  <g transform="translate(46,52) rotate(-14)" filter="url(#shadow)">
+    <rect width="46" height="62" rx="6" fill="url(#card)" stroke="#2A2A35" stroke-width="0.6"/>
+    <text x="5" y="14" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="900" fill="#E83E5C">K</text>
+    <text x="5" y="25" font-size="9" fill="#E83E5C">♥</text>
+    <text x="23" y="42" text-anchor="middle" font-size="26" fill="#E83E5C">♥</text>
+    <g transform="translate(41,57) rotate(180)">
+      <text x="0" y="0" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="900" fill="#E83E5C">K</text>
+    </g>
+  </g>
+
+  <!-- 前面：黑桃 A（右上倾） -->
+  <g transform="translate(56,42) rotate(12)" filter="url(#shadow)">
+    <rect width="46" height="62" rx="6" fill="url(#card)" stroke="#2A2A35" stroke-width="0.6"/>
+    <text x="5" y="14" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="900" fill="#2A2A35">A</text>
+    <text x="5" y="25" font-size="9" fill="#2A2A35">♠</text>
+    <text x="23" y="44" text-anchor="middle" font-size="28" fill="#2A2A35">♠</text>
+    <g transform="translate(41,57) rotate(180)">
+      <text x="0" y="0" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="900" fill="#2A2A35">A</text>
+    </g>
+  </g>
+
+  <!-- 高光：左上一抹奶油色 -->
+  <ellipse cx="50" cy="38" rx="22" ry="10" fill="#FFFFFF" opacity="0.18"/>
+
+  <!-- 装饰星点 -->
+  <circle cx="22" cy="22" r="1.5" fill="#FFD66B" opacity="0.9"/>
+  <circle cx="124" cy="28" r="1.2" fill="#FFFFFF" opacity="0.7"/>
+  <circle cx="120" cy="118" r="1.6" fill="#FFD66B" opacity="0.9"/>
+  <circle cx="20" cy="120" r="1.2" fill="#FFFFFF" opacity="0.6"/>
+</svg>

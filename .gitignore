@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+server/dist/
+server/texas-holdem-server
+server/texas-holdem-server-linux-*
+
+# Secrets — only the example is committed
+deploy/.env
+deploy/.env.local
+
+# Misc
+*.log
+*.tmp
+
+# WeChat developer tool ephemeral files
+miniprogram/miniprogram_npm/
+miniprogram_1/

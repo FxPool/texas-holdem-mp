@@ -1,0 +1,14 @@
+<view class="community">
+  <block wx:for="{{slots}}" wx:key="*this" wx:for-item="i">
+    <view class="slot {{flipFlags[i] ? 'is-flipping' : ''}}">
+      <p-card
+        wx:if="{{cards[i]}}"
+        size="md"
+        revealed="{{i < revealedCount}}"
+        suit="{{cards[i].suit}}"
+        rank="{{cards[i].rank}}"
+      />
+      <p-card wx:else size="md" placeholder="{{true}}" />
+    </view>
+  </block>
+</view>

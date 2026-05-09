@@ -1,0 +1,627 @@
+import { store } from '../../utils/store';
+import { gameSocket, DEFAULT_WS_URL } from '../../utils/socket';
+import { wireToTable } from '../../utils/wire-adapter';
+import { SUIT_SYMBOL, SUIT_COLOR } from '../../utils/cards';
+import { ensureLoggedIn } from '../../utils/auth';
+import * as sfx from '../../utils/sfx';
+import type {
+  Card,
+  ChatMessagePayload,
+  ErrorPayload,
+  GameEventPayload,
+  JoinedPayload,
+  Player,
+  PlayerAction,
+  ServerMessage,
+  Suit,
+  TableState,
+  WireRoomState,
+} from '../../types/game';
+
+const OPPONENT_POSITIONS_6: Record<number, { top: string; left: string }> = {
+  1: { top: '70%', left: '90%' },
+  2: { top: '26%', left: '85%' },
+  3: { top: '12%', left: '50%' },
+  4: { top: '26%', left: '15%' },
+  5: { top: '70%', left: '10%' },
+};
+
+interface MyCardView {
+  suit: Suit | '';
+  rank: string;
+  symbol: string;
+  color: 'red' | 'black';
+}
+
+interface OpponentView extends Player {
+  posKey: number; // 1..5, relative to my seat clockwise
+}
+
+interface ShowdownContestant {
+  userId: string;
+  nickname: string;
+  avatar: string;
+  rankSlug: string;
+  holeCards: Card[];
+  amountWon: number;
+  isWinner: boolean;
+}
+
+interface ChipFly {
+  id: number;
+  fromTop: string;
+  fromLeft: string;
+  toTop: string;
+  toLeft: string;
+  amount: number;
+}
+
+interface ChatBubble {
+  id: number;
+  seat: number;
+  top: string;
+  left: string;
+  emoji: string;
+}
+
+const QUICK_EMOJIS = ['👍', '👏', '😂', '😱', '🤔', '🔥', '💪', '🃏'];
+
+interface PageData {
+  table: TableState | null;
+  opponents: OpponentView[];
+  myPlayer: Player | null;
+  myCardsView: MyCardView[];
+  opponentPositions: Record<number, { top: string; left: string }>;
+  isMyTurn: boolean;
+  callAmount: number;
+  canCheck: boolean;
+  statusBarHeight: number;
+  connectionState: 'idle' | 'connecting' | 'connected' | 'disconnected';
+  banner: string;
+
+  // Showdown panel
+  showdownVisible: boolean;
+  showdownContestants: ShowdownContestant[];
+  showdownCommunity: Card[];
+  uncontestedWinnerName: string;
+  uncontestedAmount: number;
+
+  // Animations
+  isDealing: boolean;            // hole card deal animation playing
+  newCommunityIndices: number[]; // indices of community cards just revealed (for flip-in)
+  chipFlies: ChipFly[];          // active chip-to-pot animations
+  chatBubbles: ChatBubble[];     // active floating chat bubbles
+  chatPickerOpen: boolean;
+  quickEmojis: string[];
+}
+
+interface PageMethods {
+  onAction(e: WechatMiniprogram.CustomEvent<PlayerAction>): void;
+  onLeave(): void;
+  onSettings(): void;
+  onUnload(): void;
+  onShowdownDismiss(): void;
+  onRebuy(): void;
+  onToggleChatPicker(): void;
+  onPickEmoji(e: WechatMiniprogram.TouchEvent): void;
+  onChatBackdropTap(): void;
+  shareRoom(): void;
+  onShareAppMessage(): WechatMiniprogram.Page.ICustomShareContent;
+}
+
+function toCardView(c: Card): MyCardView {
+  return {
+    suit: c.suit,
+    rank: c.rank,
+    symbol: SUIT_SYMBOL[c.suit],
+    color: SUIT_COLOR[c.suit],
+  };
+}
+
+let unsubAll: Array<() => void> = [];
+let chipFlyIdSeq = 0;
+let chatBubbleIdSeq = 0;
+
+Page<PageData, PageMethods>({
+  data: {
+    table: null,
+    opponents: [],
+    myPlayer: null,
+    myCardsView: [],
+    opponentPositions: OPPONENT_POSITIONS_6,
+    isMyTurn: false,
+    callAmount: 0,
+    canCheck: false,
+    statusBarHeight: 20,
+    connectionState: 'idle',
+    banner: '',
+
+    showdownVisible: false,
+    showdownContestants: [],
+    showdownCommunity: [],
+    uncontestedWinnerName: '',
+    uncontestedAmount: 0,
+
+    isDealing: false,
+    newCommunityIndices: [],
+    chipFlies: [],
+    chatBubbles: [],
+    chatPickerOpen: false,
+    quickEmojis: QUICK_EMOJIS,
+  },
+
+  onLoad(options) {
+    const sysInfo = store.getSystemInfo();
+    const statusBarHeight = sysInfo?.safeAreaTop ?? 20;
+    this.setData({ statusBarHeight, connectionState: 'connecting' });
+
+    const user = store.getUser();
+    if (!user) {
+      this.setData({ banner: '用户未初始化' });
+      return;
+    }
+    const roomId = (options?.roomId as string) || '1234';
+    const buyIn = Number(options?.buyIn ?? 1000);
+
+    const offState = gameSocket.on<WireRoomState>('room-state', (msg) => {
+      if (!msg.data) return;
+      this.applyWireState(msg.data);
+    });
+    const offJoined = gameSocket.on<JoinedPayload>('joined', (msg) => {
+      console.log('[table] joined', msg.data);
+      this.setData({ banner: '' });
+    });
+    const offError = gameSocket.on<ErrorPayload>('error', (msg) => {
+      const text = msg.data?.message || msg.data?.code || 'unknown error';
+      console.warn('[table] server error', msg.data);
+      wx.showToast({ title: text, icon: 'none', duration: 2000 });
+    });
+    const offEvent = gameSocket.on<GameEventPayload>('game-event', (msg) => {
+      this.handleGameEvent(msg.data);
+    });
+    const offChat = gameSocket.on<ChatMessagePayload>('chat', (msg) => {
+      if (!msg.data) return;
+      this.spawnChatBubble(msg.data);
+    });
+    const offAny = gameSocket.onAny((_m: ServerMessage) => {
+      // diagnostic hook
+    });
+    unsubAll = [offState, offJoined, offError, offEvent, offChat, offAny];
+
+    this.setData({ banner: '获取登录凭据…' });
+    ensureLoggedIn()
+      .catch((err) => {
+        // Soft-auth: log the failure but try connecting anyway (server may be
+        // running without AUTH_REQUIRED so anonymous join still works).
+        console.warn('[table] ensureLoggedIn failed (continuing anonymously)', err);
+        return '';
+      })
+      .then((token) => {
+        const fresh = store.getUser();
+        const wsURL = token ? `${DEFAULT_WS_URL}?token=${encodeURIComponent(token)}` : DEFAULT_WS_URL;
+        this.setData({ banner: `连接 ${wsURL.split('?')[0]} …` });
+        const u = fresh ?? user;
+        const sendJoin = () => {
+          gameSocket.send('join', {
+            roomId,
+            userId: u.uid,
+            nickname: u.nickname,
+            avatar: u.avatar,
+            buyIn,
+          });
+        };
+        return gameSocket
+          .connect({
+            url: wsURL,
+            onClose: (info) => {
+              this.setData({
+                connectionState: 'disconnected',
+                banner: `连接断开 code=${info.code}，重连中…`,
+              });
+            },
+            onError: (err) => {
+              const msg = (err as { errMsg?: string })?.errMsg || JSON.stringify(err);
+              this.setData({ connectionState: 'disconnected', banner: `连接错误: ${msg}` });
+            },
+            reconnect: {
+              maxAttempts: 6,
+              baseDelayMs: 800,
+              onReconnecting: (attempt, delayMs) => {
+                this.setData({
+                  banner: `第 ${attempt} 次重连，${Math.ceil(delayMs / 1000)}s 后重试…`,
+                });
+              },
+              onReconnect: () => {
+                this.setData({ connectionState: 'connected', banner: '重新加入中…' });
+                sendJoin();
+              },
+              onGiveUp: () => {
+                this.setData({ banner: '重连失败，请返回大厅再次进入' });
+              },
+            },
+          })
+          .then(() => {
+            this.setData({ connectionState: 'connected', banner: '加入房间中…' });
+            sendJoin();
+          });
+      })
+      .catch((err) => {
+        console.warn('[table] connect failed', err);
+        const msg = (err as { errMsg?: string })?.errMsg || JSON.stringify(err);
+        this.setData({ banner: `无法连接: ${msg}` });
+      });
+  },
+
+  onUnload() {
+    unsubAll.forEach((fn) => fn());
+    unsubAll = [];
+    if (gameSocket.isConnected()) gameSocket.send('leave', { roomId: this.data.table?.roomId });
+    gameSocket.close();
+  },
+
+  applyWireState(wire: WireRoomState) {
+    const user = store.getUser();
+    if (!user) return;
+    const prev = this.data.table;
+    const table = wireToTable(wire, user.uid, prev);
+    store.setRoomState(wire);
+
+    const me = table.players.find((p) => p.isMe) ?? null;
+    const mySeat = me?.seat ?? 0;
+    const opponents: OpponentView[] = table.players
+      .filter((p) => !p.isMe)
+      .map((p) => ({
+        ...p,
+        posKey: ((p.seat - mySeat + table.maxSeats) % table.maxSeats),
+      }));
+    const isMyTurn = !!me && table.activeSeat === me.seat;
+    const callAmount = me ? Math.max(0, table.currentBet - me.betThisRound) : 0;
+    const myCardsView = me ? me.holeCards.map(toCardView) : [];
+
+    // Detect new community cards revealed and trigger flip-in for those indices
+    const prevRevealed = prev?.revealedCount ?? 0;
+    const nowRevealed = table.revealedCount;
+    let newIdx: number[] = [];
+    if (nowRevealed > prevRevealed) {
+      for (let i = prevRevealed; i < nowRevealed; i++) newIdx.push(i);
+      // clear flag after animation length
+      setTimeout(() => {
+        this.setData({ newCommunityIndices: [] });
+      }, 700);
+    }
+
+    // Detect a fresh hand starting (preflop with hole cards we didn't have before)
+    const wasIdle = !prev || prev.stage === 'waiting' || prev.stage === 'hand-complete';
+    const enteringPreflop = table.stage === 'preflop';
+    if (wasIdle && enteringPreflop) {
+      this.setData({ isDealing: true });
+      setTimeout(() => this.setData({ isDealing: false }), 900);
+      // Dismiss any lingering showdown panel from the previous hand
+      if (this.data.showdownVisible) {
+        this.setData({
+          showdownVisible: false,
+          showdownContestants: [],
+          showdownCommunity: [],
+          uncontestedWinnerName: '',
+          uncontestedAmount: 0,
+        });
+      }
+    }
+
+    this.setData({
+      table,
+      myPlayer: me,
+      opponents,
+      myCardsView,
+      isMyTurn,
+      callAmount,
+      canCheck: callAmount === 0,
+      banner: '',
+      newCommunityIndices: newIdx.length ? newIdx : this.data.newCommunityIndices,
+    });
+  },
+
+  handleGameEvent(payload: GameEventPayload | undefined) {
+    if (!payload) return;
+    console.log('[table] event', payload.type, payload.data);
+
+    switch (payload.type) {
+      case 'action':
+      case 'blind-posted': {
+        // Spawn a chip flying from the actor's seat to the pot
+        const seat = payload.data?.seat as number | undefined;
+        const amount = (payload.data?.amount ?? 0) as number;
+        const actType = String(payload.data?.type || '');
+        if (typeof seat === 'number' && amount > 0) {
+          this.spawnChipFly(seat, amount);
+          sfx.play('chip');
+        } else if (actType === 'Fold') {
+          sfx.play('fold');
+        }
+        break;
+      }
+      case 'hole-dealt':
+      case 'community-dealt': {
+        sfx.play('deal');
+        break;
+      }
+      case 'showdown': {
+        const community = (payload.data?.community as Card[]) || [];
+        const hands = (payload.data?.hands as Array<{ playerId: string; rank: string; holeCards: Card[] }>) || [];
+        const shares = (payload.data?.shares as Array<{ playerId: string; amount: number }>) || [];
+        this.flyPotToWinners(shares);
+        this.openShowdown(community, hands, shares);
+        sfx.play('win');
+        break;
+      }
+      case 'hand-complete': {
+        if (payload.data?.uncontested) {
+          // winnerSeat → look up nickname
+          const winnerSeat = payload.data?.winner as number | undefined;
+          const amount = (payload.data?.amount as number) ?? 0;
+          const tbl = this.data.table;
+          const winner = tbl?.players.find((p) => p.seat === winnerSeat);
+          if (typeof winnerSeat === 'number') {
+            this.flyPotToSeat(winnerSeat, amount);
+          }
+          this.setData({
+            showdownVisible: true,
+            uncontestedWinnerName: winner?.nickname || '玩家',
+            uncontestedAmount: amount,
+            showdownContestants: [],
+          });
+        }
+        break;
+      }
+    }
+  },
+
+  openShowdown(
+    community: Card[],
+    hands: Array<{ playerId: string; rank: string; holeCards: Card[] }>,
+    shares: Array<{ playerId: string; amount: number }>,
+  ) {
+    const tbl = this.data.table;
+    if (!tbl) return;
+    // Aggregate share amounts per player
+    const wonByUid: Record<string, number> = {};
+    for (const s of shares) {
+      wonByUid[s.playerId] = (wonByUid[s.playerId] || 0) + s.amount;
+    }
+    const contestants: ShowdownContestant[] = hands.map((h) => {
+      const player = tbl.players.find((p) => p.uid === h.playerId);
+      const won = wonByUid[h.playerId] || 0;
+      return {
+        userId: h.playerId,
+        nickname: player?.nickname || h.playerId,
+        avatar: player?.avatar || '🃏',
+        rankSlug: h.rank,
+        holeCards: h.holeCards,
+        amountWon: won,
+        isWinner: won > 0,
+      };
+    });
+    // Sort: winners first, then by hand rank descending name (alpha is fine)
+    contestants.sort((a, b) => Number(b.isWinner) - Number(a.isWinner));
+    this.setData({
+      showdownVisible: true,
+      showdownContestants: contestants,
+      showdownCommunity: community,
+      uncontestedWinnerName: '',
+      uncontestedAmount: 0,
+    });
+  },
+
+  flyPotToWinners(shares: Array<{ playerId: string; amount: number }>) {
+    const tbl = this.data.table;
+    if (!tbl) return;
+    // Aggregate amounts per uid
+    const totalByUid: Record<string, number> = {};
+    for (const s of shares) {
+      totalByUid[s.playerId] = (totalByUid[s.playerId] || 0) + s.amount;
+    }
+    for (const uid of Object.keys(totalByUid)) {
+      const amount = totalByUid[uid];
+      const player = tbl.players.find((p) => p.uid === uid);
+      if (!player) continue;
+      this.flyPotToSeat(player.seat, amount);
+    }
+  },
+
+  flyPotToSeat(seatNumber: number, amount: number) {
+    const me = this.data.myPlayer;
+    if (!me || !this.data.table) return;
+    const isMe = seatNumber === me.seat;
+    let toTop = '95%';
+    let toLeft = '50%';
+    if (!isMe) {
+      const posKey = (seatNumber - me.seat + this.data.table.maxSeats) % this.data.table.maxSeats;
+      const pos = OPPONENT_POSITIONS_6[posKey];
+      if (pos) {
+        toTop = pos.top;
+        toLeft = pos.left;
+      }
+    }
+    const id = ++chipFlyIdSeq;
+    const fly: ChipFly = {
+      id,
+      fromTop: '50%',
+      fromLeft: '50%',
+      toTop,
+      toLeft,
+      amount,
+    };
+    this.setData({ chipFlies: [...this.data.chipFlies, fly] });
+    setTimeout(() => {
+      this.setData({
+        chipFlies: this.data.chipFlies.filter((c) => c.id !== id),
+      });
+    }, 750);
+  },
+
+  spawnChipFly(seatNumber: number, amount: number) {
+    const me = this.data.myPlayer;
+    if (!me || !this.data.table) return;
+    const isMe = seatNumber === me.seat;
+    let fromTop = '50%';
+    let fromLeft = '50%';
+    if (isMe) {
+      // me-zone is below the felt; chips originate from somewhere near the bottom
+      fromTop = '95%';
+      fromLeft = '50%';
+    } else {
+      const posKey = (seatNumber - me.seat + this.data.table.maxSeats) % this.data.table.maxSeats;
+      const pos = OPPONENT_POSITIONS_6[posKey];
+      if (pos) {
+        fromTop = pos.top;
+        fromLeft = pos.left;
+      }
+    }
+    const id = ++chipFlyIdSeq;
+    const fly: ChipFly = {
+      id,
+      fromTop,
+      fromLeft,
+      toTop: '50%',
+      toLeft: '50%',
+      amount,
+    };
+    this.setData({ chipFlies: [...this.data.chipFlies, fly] });
+    // Cleanup after animation
+    setTimeout(() => {
+      this.setData({
+        chipFlies: this.data.chipFlies.filter((c) => c.id !== id),
+      });
+    }, 700);
+  },
+
+  onShowdownDismiss() {
+    this.setData({ showdownVisible: false });
+  },
+
+  spawnChatBubble(payload: ChatMessagePayload) {
+    const me = this.data.myPlayer;
+    const tbl = this.data.table;
+    if (!tbl) return;
+    let top = '95%';
+    let left = '50%';
+    if (me && payload.seat === me.seat) {
+      // From self — anchor at me-zone top
+      top = '100%';
+      left = '50%';
+    } else if (me) {
+      const posKey = (payload.seat - me.seat + tbl.maxSeats) % tbl.maxSeats;
+      const pos = OPPONENT_POSITIONS_6[posKey];
+      if (pos) {
+        top = pos.top;
+        left = pos.left;
+      }
+    }
+    const id = ++chatBubbleIdSeq;
+    const bubble: ChatBubble = { id, seat: payload.seat, top, left, emoji: payload.emoji };
+    this.setData({ chatBubbles: [...this.data.chatBubbles, bubble] });
+    setTimeout(() => {
+      this.setData({
+        chatBubbles: this.data.chatBubbles.filter((b) => b.id !== id),
+      });
+    }, 2200);
+  },
+
+  onToggleChatPicker() {
+    this.setData({ chatPickerOpen: !this.data.chatPickerOpen });
+  },
+
+  onChatBackdropTap() {
+    this.setData({ chatPickerOpen: false });
+  },
+
+  onPickEmoji(e) {
+    const emoji = String(e.currentTarget.dataset.emoji || '');
+    this.setData({ chatPickerOpen: false });
+    const roomId = this.data.table?.roomId;
+    if (!emoji || !roomId) return;
+    gameSocket.send('chat', { roomId, emoji });
+  },
+
+  onAction(e) {
+    const act = e.detail;
+    const roomId = this.data.table?.roomId;
+    if (!roomId) return;
+    gameSocket.send('action', { roomId, type: act.type, amount: act.amount });
+  },
+
+  onRebuy() {
+    const roomId = this.data.table?.roomId;
+    if (!roomId) return;
+    const amount = (this.data.table?.bigBlind ?? 100) * 10; // default 10 BB
+    wx.showModal({
+      title: '加买',
+      content: `加买 ${amount} 筹码继续游戏？`,
+      confirmText: '加买',
+      cancelText: '取消',
+      success: (res) => {
+        if (res.confirm) {
+          gameSocket.send('rebuy', { roomId, amount });
+        }
+      },
+    });
+  },
+
+  onLeave() {
+    wx.navigateBack({ delta: 1 });
+  },
+
+  onSettings() {
+    const muted = sfx.isMuted();
+    const items = [
+      muted ? '🔊 打开音效' : '🔇 关闭音效',
+      '🔗 分享房间',
+      '🚪 离开房间',
+    ];
+    wx.showActionSheet({
+      itemList: items,
+      success: (res) => {
+        switch (res.tapIndex) {
+          case 0:
+            sfx.setMuted(!muted);
+            wx.showToast({ title: muted ? '音效已开' : '音效已关', icon: 'none' });
+            break;
+          case 1:
+            this.shareRoom();
+            break;
+          case 2:
+            wx.showModal({
+              title: '离开房间',
+              content: '本手牌仍在进行中将自动弃牌。确定离开？',
+              confirmText: '离开',
+              cancelText: '取消',
+              success: (m) => {
+                if (m.confirm) this.onLeave();
+              },
+            });
+            break;
+        }
+      },
+    });
+  },
+
+  shareRoom() {
+    const roomId = this.data.table?.roomId;
+    if (!roomId) return;
+    // The share button (•••) on the nav bar uses onShareAppMessage. From an
+    // action-sheet we can only suggest copying the room id.
+    wx.setClipboardData({
+      data: `房间号 #${roomId}`,
+      success: () => wx.showToast({ title: '房间号已复制，点 ⋯ 转发好友', icon: 'none', duration: 2200 }),
+    });
+  },
+
+  onShareAppMessage() {
+    const roomId = this.data.table?.roomId;
+    const buyIn = this.data.myPlayer?.chips ?? 1000;
+    return {
+      title: roomId ? `德州扑克 · 房间 #${roomId}，来一把？` : '德州扑克娱乐',
+      path: roomId ? `/pages/table/table?roomId=${roomId}&buyIn=${buyIn}` : '/pages/index/index',
+    };
+  },
+});

@@ -1,0 +1,41 @@
+<view class="action-bar {{disabled ? 'is-disabled' : ''}}">
+  <!-- 加注滑块面板（弹出式） -->
+  <view wx:if="{{showSlider}}" class="raise-panel">
+    <view class="quick-row">
+      <view class="quick-btn" bindtap="onQuickBet" data-ratio="0.33">⅓</view>
+      <view class="quick-btn" bindtap="onQuickBet" data-ratio="0.5">½</view>
+      <view class="quick-btn" bindtap="onQuickBet" data-ratio="0.75">¾</view>
+      <view class="quick-btn" bindtap="onQuickBet" data-ratio="1">All-In</view>
+    </view>
+    <slider
+      class="slider"
+      min="{{minRaise}}"
+      max="{{maxRaise}}"
+      step="50"
+      value="{{raiseAmount}}"
+      activeColor="#FFD66B"
+      backgroundColor="rgba(255,246,224,0.2)"
+      block-color="#FFD66B"
+      block-size="28"
+      bindchange="onSliderChange"
+    />
+    <view class="amount-row">
+      <text class="amount-label">加注至</text>
+      <text class="amount-value">{{raiseAmount}}</text>
+      <view class="confirm-btn" bindtap="onRaiseConfirm">确认</view>
+    </view>
+  </view>
+
+  <!-- 主按钮行 -->
+  <view class="btn-row">
+    <view class="act-btn fold" bindtap="onFold">弃牌</view>
+    <view class="act-btn call" bindtap="onCheckOrCall">
+      <text class="act-label">{{canCheck ? '过牌' : '跟注'}}</text>
+      <text wx:if="{{!canCheck && callAmount > 0}}" class="act-amount">{{callAmount}}</text>
+    </view>
+    <view class="act-btn raise" bindtap="onRaiseToggle">
+      <text class="act-label">加注</text>
+      <text class="act-arrow">{{showSlider ? '▾' : '▸'}}</text>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,42 @@
+# systemd unit for running the Go server directly (without Docker).
+# Place this file at /etc/systemd/system/texas-holdem.service, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now texas-holdem
+#
+# Pair with nginx/Caddy in front for TLS. /etc/default/texas-holdem
+# should contain:
+#   AUTH_SECRET=<64-hex>
+#   WX_APPID=...
+#   WX_APPSECRET=...
+#   AUTH_REQUIRED=1
+
+[Unit]
+Description=Texas Holdem WS server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=texas
+Group=texas
+EnvironmentFile=/etc/default/texas-holdem
+ExecStart=/usr/local/bin/texas-holdem-server
+Restart=on-failure
+RestartSec=2s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,163 @@
+<view class="page">
+  <!-- 顶部栏 -->
+  <view class="topbar" style="padding-top: {{statusBarHeight}}px;">
+    <view class="topbar-btn" bindtap="onLeave">
+      <text class="icon">←</text>
+    </view>
+    <view class="topbar-title" wx:if="{{table}}">
+      <text class="room-label">房间</text>
+      <text class="room-id">#{{table.roomId}}</text>
+      <text class="blinds">{{table.smallBlind}}/{{table.bigBlind}}</text>
+    </view>
+    <view class="topbar-title" wx:else>
+      <text class="room-label">{{connectionState === 'connecting' ? '连接中…' : '德州扑克'}}</text>
+    </view>
+    <view class="topbar-btn" bindtap="onSettings">
+      <text class="icon">⚙</text>
+    </view>
+  </view>
+
+  <view wx:if="{{banner}}" class="banner">{{banner}}</view>
+
+  <block wx:if="{{table}}">
+    <view class="stage-tag">{{table.stage}}</view>
+
+    <view class="table-zone">
+      <view class="felt">
+        <view class="felt-inner">
+          <view class="center-stack">
+            <p-community-cards
+              cards="{{table.communityCards}}"
+              revealed-count="{{table.revealedCount}}"
+              new-indices="{{newCommunityIndices}}"
+            />
+            <view class="pot-row">
+              <p-pot pot="{{table.pot}}" current-bet="{{table.currentBet}}" />
+            </view>
+          </view>
+        </view>
+
+        <!-- 对手座位 -->
+        <block wx:for="{{opponents}}" wx:key="seat" wx:for-item="player">
+          <view
+            class="seat-pos"
+            style="top: {{opponentPositions[player.posKey].top}}; left: {{opponentPositions[player.posKey].left}};"
+          >
+            <p-seat
+              player="{{player}}"
+              is-active="{{player.seat === table.activeSeat}}"
+              deadline="{{table.actionDeadline}}"
+              show-hole-cards="{{false}}"
+            />
+          </view>
+        </block>
+
+        <!-- 发牌动画层（仅在 isDealing 时显示） -->
+        <block wx:if="{{isDealing}}">
+          <view class="deal-card deal-to-me"></view>
+          <view class="deal-card deal-to-me delay-1"></view>
+          <block wx:for="{{opponents}}" wx:key="seat" wx:for-item="player">
+            <view
+              class="deal-card deal-to-pos"
+              style="--target-top: {{opponentPositions[player.posKey].top}}; --target-left: {{opponentPositions[player.posKey].left}};"
+            ></view>
+            <view
+              class="deal-card deal-to-pos delay-1"
+              style="--target-top: {{opponentPositions[player.posKey].top}}; --target-left: {{opponentPositions[player.posKey].left}};"
+            ></view>
+          </block>
+        </block>
+
+        <!-- 筹码飞入动画 -->
+        <block wx:for="{{chipFlies}}" wx:key="id" wx:for-item="fly">
+          <view
+            class="chip-fly"
+            style="--from-top: {{fly.fromTop}}; --from-left: {{fly.fromLeft}}; --to-top: {{fly.toTop}}; --to-left: {{fly.toLeft}};"
+          >
+            <view class="chip-disc"></view>
+            <text class="chip-amount">{{fly.amount}}</text>
+          </view>
+        </block>
+
+        <!-- 聊天表情气泡 -->
+        <block wx:for="{{chatBubbles}}" wx:key="id" wx:for-item="bubble">
+          <view class="chat-bubble" style="top: {{bubble.top}}; left: {{bubble.left}};">
+            <text class="chat-bubble-emoji">{{bubble.emoji}}</text>
+          </view>
+        </block>
+      </view>
+    </view>
+
+    <view wx:if="{{myPlayer}}" class="me-zone {{isMyTurn ? 'is-my-turn' : ''}}">
+      <view class="me-cards">
+        <block wx:for="{{myCardsView}}" wx:key="index">
+          <view class="me-card-tilt tilt-{{index}}">
+            <p-card size="lg" suit="{{item.suit}}" rank="{{item.rank}}" revealed="{{true}}" />
+          </view>
+        </block>
+      </view>
+      <view class="me-info-row">
+        <view class="me-avatar-wrap">
+          <view wx:if="{{isMyTurn}}" class="me-active-ring"></view>
+          <view class="me-avatar">
+            <text class="me-avatar-emoji">{{myPlayer.avatar}}</text>
+          </view>
+          <view wx:if="{{myPlayer.isDealer}}" class="me-badge me-badge-d">D</view>
+          <view wx:elif="{{myPlayer.isBigBlind}}" class="me-badge me-badge-bb">BB</view>
+          <view wx:elif="{{myPlayer.isSmallBlind}}" class="me-badge me-badge-sb">SB</view>
+        </view>
+        <view class="me-meta">
+          <text class="me-name">{{myPlayer.nickname}}</text>
+          <view class="me-chips-row">
+            <text class="me-chips-icon">●</text>
+            <text class="me-chips">{{myPlayer.chips}}</text>
+          </view>
+        </view>
+        <view wx:if="{{myPlayer.betThisRound > 0}}" class="me-bet">
+          <text class="me-bet-icon">●</text>
+          <text class="me-bet-num">已下 {{myPlayer.betThisRound}}</text>
+        </view>
+        <view
+          wx:elif="{{myPlayer.chips === 0 && (table.stage === 'waiting' || table.stage === 'hand-complete')}}"
+          class="rebuy-btn"
+          bindtap="onRebuy"
+        >+ 加买</view>
+      </view>
+    </view>
+
+    <!-- 表情选择器（覆盖在 action-zone 之上） -->
+    <view wx:if="{{chatPickerOpen}}" class="chat-backdrop" catchtap="onChatBackdropTap">
+      <view class="chat-picker" catchtap="">
+        <block wx:for="{{quickEmojis}}" wx:key="*this" wx:for-item="emoji">
+          <view class="chat-pick-btn" data-emoji="{{emoji}}" bindtap="onPickEmoji">{{emoji}}</view>
+        </block>
+      </view>
+    </view>
+
+    <view class="action-zone" wx:if="{{myPlayer}}">
+      <view class="chat-trigger" catchtap="onToggleChatPicker">😀</view>
+      <view wx:if="{{table.stage === 'waiting'}}" class="wait-tip">等待更多玩家加入…</view>
+      <view wx:elif="{{table.stage === 'hand-complete'}}" class="wait-tip">本手结束，等待下一手…</view>
+      <view wx:elif="{{!isMyTurn}}" class="wait-tip">等待其他玩家行动…</view>
+      <p-action-bar
+        can-check="{{canCheck}}"
+        call-amount="{{callAmount}}"
+        min-raise="{{table.currentBet + table.minRaise}}"
+        max-raise="{{myPlayer.chips + myPlayer.betThisRound}}"
+        my-chips="{{myPlayer.chips}}"
+        disabled="{{!isMyTurn}}"
+        bind:action="onAction"
+      />
+    </view>
+  </block>
+
+  <!-- 摊牌面板 -->
+  <p-showdown-panel
+    visible="{{showdownVisible}}"
+    contestants="{{showdownContestants}}"
+    community="{{showdownCommunity}}"
+    uncontested-winner="{{uncontestedWinnerName}}"
+    uncontested-amount="{{uncontestedAmount}}"
+    bind:dismiss="onShowdownDismiss"
+  />
+</view>

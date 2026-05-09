@@ -1,0 +1,63 @@
+/* 全局卡通配色变量 - 通过 CSS var 在所有页面/组件可用 */
+page {
+  --bg-deep: #2B1B4D;
+  --bg-mid: #1A2B5C;
+  --table-felt-1: #7FCBA4;
+  --table-felt-2: #3E8E5E;
+  --table-rim: #F4B6A0;
+  --gold: #FFD66B;
+  --gold-deep: #E0A744;
+  --cream: #FFF6E0;
+  --danger: #FF6B7A;
+  --info: #6BB6FF;
+  --muted: rgba(255, 246, 224, 0.55);
+
+  background: linear-gradient(180deg, var(--bg-deep) 0%, var(--bg-mid) 100%);
+  color: var(--cream);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+  height: 100%;
+  width: 100%;
+}
+
+view, text {
+  box-sizing: border-box;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+}
+
+.center {
+  justify-content: center;
+  align-items: center;
+}
+
+.btn {
+  padding: 16rpx 36rpx;
+  border-radius: 40rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  background: var(--gold);
+  color: #4A2E00;
+  text-align: center;
+  box-shadow: 0 4rpx 0 var(--gold-deep);
+}
+
+.btn:active {
+  transform: translateY(2rpx);
+  box-shadow: 0 2rpx 0 var(--gold-deep);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 2rpx solid var(--cream);
+  color: var(--cream);
+  box-shadow: none;
+}

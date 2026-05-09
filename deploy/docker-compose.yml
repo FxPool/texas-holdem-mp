@@ -1,0 +1,51 @@
+# One-command stack: Caddy reverse-proxies HTTPS → Go server, Go server runs the game.
+# Real domain + auto Let's Encrypt cert via Caddy.
+#
+# Usage:
+#   1. Edit Caddyfile and replace EXAMPLE_DOMAIN with your actual domain.
+#   2. Set env vars in a .env file alongside this compose:
+#        AUTH_SECRET=<64-char hex>
+#        WX_APPID=<your-appid>
+#        WX_APPSECRET=<your-appsecret>
+#   3. docker compose up -d
+#
+# Generate AUTH_SECRET once with:
+#   openssl rand -hex 32
+services:
+  game:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    environment:
+      ADDR: ":18080"
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
+      AUTH_REQUIRED: "1"
+      AUTH_TTL: "168h"
+      WX_APPID: ${WX_APPID:-}
+      WX_APPSECRET: ${WX_APPSECRET:-}
+    restart: unless-stopped
+    expose:
+      - "18080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - game
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,482 @@
+.page {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #2B1B4D 0%, #1A2B5C 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(2rpx 2rpx at 20% 30%, rgba(255,255,255,0.6), transparent),
+    radial-gradient(2rpx 2rpx at 70% 15%, rgba(255,255,255,0.4), transparent),
+    radial-gradient(3rpx 3rpx at 80% 60%, rgba(255,214,107,0.5), transparent),
+    radial-gradient(2rpx 2rpx at 30% 80%, rgba(255,255,255,0.3), transparent);
+  pointer-events: none;
+}
+
+/* 顶部栏 */
+.topbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 24rpx;
+  z-index: 10;
+  position: relative;
+}
+
+.topbar-btn {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  background: rgba(255, 246, 224, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid rgba(255, 246, 224, 0.2);
+}
+
+.topbar-btn .icon {
+  font-size: 32rpx;
+  color: #FFF6E0;
+}
+
+.topbar-title {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10rpx;
+  background: rgba(20, 12, 40, 0.6);
+  padding: 8rpx 24rpx;
+  border-radius: 30rpx;
+  border: 2rpx solid rgba(255, 214, 107, 0.3);
+}
+
+.room-label { font-size: 22rpx; color: rgba(255, 246, 224, 0.6); }
+.room-id { font-size: 30rpx; font-weight: 800; color: #FFD66B; }
+.blinds { font-size: 22rpx; color: rgba(255, 246, 224, 0.7); margin-left: 6rpx; }
+
+/* 加载/错误提示横幅 */
+.banner {
+  margin: 8rpx 24rpx;
+  padding: 16rpx 24rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 214, 107, 0.12);
+  border: 2rpx solid rgba(255, 214, 107, 0.4);
+  color: #FFD66B;
+  font-size: 26rpx;
+  text-align: center;
+}
+
+/* 阶段标签：固定在顶栏下方居中，独立一行 */
+.stage-tag {
+  align-self: center;
+  margin: 8rpx 0 0;
+  background: rgba(255, 214, 107, 0.15);
+  color: #FFD66B;
+  padding: 4rpx 24rpx;
+  border-radius: 20rpx;
+  font-size: 22rpx;
+  letter-spacing: 6rpx;
+  text-transform: uppercase;
+  border: 2rpx solid rgba(255, 214, 107, 0.4);
+  z-index: 5;
+}
+
+/* 桌面区 */
+.table-zone {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 0 20rpx;
+  min-height: 0;
+}
+
+.felt {
+  position: relative;
+  width: 92%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.felt-inner {
+  position: absolute;
+  inset: 36rpx;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at center, #7FCBA4 0%, #4FA274 60%, #3E8E5E 100%);
+  border: 12rpx solid #F4B6A0;
+  box-shadow:
+    inset 0 0 60rpx rgba(0,0,0,0.25),
+    0 12rpx 30rpx rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.felt-inner::before {
+  content: '';
+  position: absolute;
+  inset: -4rpx;
+  border-radius: 50%;
+  border: 2rpx solid rgba(255, 214, 107, 0.5);
+  pointer-events: none;
+}
+
+.center-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.pot-row {
+  margin-top: 4rpx;
+}
+
+/* 对手座位绝对定位在 felt 上 */
+.seat-pos {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+/* 我的私人区域 */
+.me-zone {
+  margin: 0 24rpx 8rpx;
+  padding: 12rpx 20rpx 16rpx;
+  border-radius: 28rpx;
+  background: rgba(20, 12, 40, 0.55);
+  border: 2rpx solid rgba(255, 246, 224, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10rpx;
+  position: relative;
+  z-index: 6;
+}
+
+.me-zone.is-my-turn {
+  border-color: rgba(255, 214, 107, 0.7);
+  box-shadow: 0 0 20rpx rgba(255, 214, 107, 0.3);
+}
+
+.me-cards {
+  display: flex;
+  flex-direction: row;
+  gap: 16rpx;
+  margin-top: -64rpx; /* 让手牌探出 me-zone 顶部，更立体 */
+  margin-bottom: 4rpx;
+}
+
+.me-card-tilt {
+  display: inline-block;
+  filter: drop-shadow(0 6rpx 12rpx rgba(0,0,0,0.4));
+}
+
+.me-card-tilt.tilt-0 { transform: rotate(-5deg); }
+.me-card-tilt.tilt-1 { transform: rotate(5deg); }
+
+.me-info-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16rpx;
+  width: 100%;
+}
+
+.me-avatar-wrap {
+  position: relative;
+  width: 84rpx;
+  height: 84rpx;
+}
+
+.me-active-ring {
+  position: absolute;
+  inset: -6rpx;
+  border-radius: 50%;
+  border: 4rpx solid #FFD66B;
+  box-shadow: 0 0 16rpx #FFD66B;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 8rpx #FFD66B; }
+  50% { box-shadow: 0 0 24rpx #FFD66B; }
+}
+
+.me-avatar {
+  width: 84rpx;
+  height: 84rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #FFF6E0 0%, #FFD66B 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3rpx solid rgba(255, 246, 224, 0.4);
+  box-shadow: 0 4rpx 8rpx rgba(0,0,0,0.3);
+}
+
+.me-avatar-emoji {
+  font-size: 50rpx;
+  line-height: 1;
+}
+
+.me-badge {
+  position: absolute;
+  bottom: -4rpx;
+  right: -6rpx;
+  min-width: 36rpx;
+  height: 32rpx;
+  padding: 0 8rpx;
+  border-radius: 18rpx;
+  font-size: 20rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2rpx 4rpx rgba(0,0,0,0.3);
+}
+
+.me-badge-d { background: #FFD66B; color: #4A2E00; }
+.me-badge-sb { background: #6BB6FF; color: #fff; }
+.me-badge-bb { background: #FF6B7A; color: #fff; }
+
+.me-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.me-name {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #FFF6E0;
+}
+
+.me-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.me-chips-icon { color: #FFD66B; font-size: 22rpx; }
+.me-chips { font-size: 30rpx; color: #FFD66B; font-weight: 800; }
+
+.me-bet {
+  background: rgba(255, 214, 107, 0.18);
+  border: 2rpx solid #FFD66B;
+  border-radius: 20rpx;
+  padding: 4rpx 16rpx;
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+}
+
+.me-bet-icon { color: #FFD66B; font-size: 18rpx; }
+.me-bet-num { font-size: 22rpx; color: #FFD66B; font-weight: 700; }
+
+.rebuy-btn {
+  background: #FFD66B;
+  color: #4A2E00;
+  font-size: 24rpx;
+  font-weight: 800;
+  padding: 10rpx 24rpx;
+  border-radius: 24rpx;
+  box-shadow: 0 3rpx 0 #E0A744;
+}
+.rebuy-btn:active {
+  transform: translateY(2rpx);
+  box-shadow: 0 1rpx 0 #E0A744;
+}
+
+/* ========================================
+   动画层
+   ======================================== */
+
+/* 发牌动画：单张牌从桌中飞向座位 */
+.deal-card {
+  position: absolute;
+  width: 60rpx;
+  height: 88rpx;
+  border-radius: 12rpx;
+  border: 3rpx solid #FFD66B;
+  background: repeating-linear-gradient(
+    45deg,
+    #6B4FBC 0 8rpx,
+    #4A3590 8rpx 16rpx
+  );
+  box-shadow: 0 4rpx 8rpx rgba(0,0,0,0.4);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 20;
+}
+
+.deal-card.deal-to-me {
+  animation: deal-to-me 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.deal-card.deal-to-me.delay-1 {
+  animation-delay: 0.12s;
+}
+
+@keyframes deal-to-me {
+  0%   { top: 50%; left: 50%; opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  10%  { opacity: 1; }
+  100% { top: 110%; left: 50%; opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+
+.deal-card.deal-to-pos {
+  animation: deal-to-pos 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.deal-card.deal-to-pos.delay-1 {
+  animation-delay: 0.12s;
+}
+
+@keyframes deal-to-pos {
+  0%   { top: 50%; left: 50%; opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  10%  { opacity: 1; }
+  100% { top: var(--target-top); left: var(--target-left); opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* 筹码飞入动画 */
+.chip-fly {
+  position: absolute;
+  top: var(--from-top);
+  left: var(--from-left);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 25;
+  animation: chip-fly 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+}
+
+@keyframes chip-fly {
+  0%   { top: var(--from-top); left: var(--from-left); opacity: 0.8; transform: translate(-50%, -50%) scale(0.6); }
+  20%  { opacity: 1; }
+  100% { top: var(--to-top); left: var(--to-left); opacity: 0; transform: translate(-50%, -50%) scale(1.1); }
+}
+
+.chip-fly .chip-disc {
+  width: 36rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #FFD66B, #E0A744);
+  border: 2rpx solid rgba(0,0,0,0.25);
+  box-shadow: 0 2rpx 4rpx rgba(0,0,0,0.3);
+}
+
+.chip-fly .chip-amount {
+  font-size: 22rpx;
+  color: #FFD66B;
+  font-weight: 800;
+  text-shadow: 0 1rpx 2rpx rgba(0,0,0,0.6);
+}
+
+/* 聊天气泡：玩家附近浮起再消散 */
+.chat-bubble {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 30;
+  background: rgba(20, 12, 40, 0.92);
+  border: 2rpx solid rgba(255, 214, 107, 0.6);
+  border-radius: 32rpx;
+  padding: 8rpx 18rpx;
+  animation: chat-float 2.2s ease-out forwards;
+  filter: drop-shadow(0 4rpx 8rpx rgba(0,0,0,0.4));
+}
+
+.chat-bubble-emoji {
+  font-size: 40rpx;
+  line-height: 1;
+}
+
+@keyframes chat-float {
+  0%   { opacity: 0; transform: translate(-50%, -30%) scale(0.6); }
+  20%  { opacity: 1; transform: translate(-50%, -90%) scale(1); }
+  80%  { opacity: 1; transform: translate(-50%, -120%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -150%) scale(0.95); }
+}
+
+/* 表情选择器 */
+.chat-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 220rpx;
+}
+
+.chat-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14rpx;
+  background: rgba(20, 12, 40, 0.95);
+  border: 2rpx solid rgba(255, 214, 107, 0.4);
+  border-radius: 24rpx;
+  padding: 18rpx 18rpx;
+  width: 86%;
+}
+
+.chat-pick-btn {
+  font-size: 50rpx;
+  text-align: center;
+  padding: 12rpx 0;
+  border-radius: 16rpx;
+  background: rgba(255, 246, 224, 0.06);
+  border: 2rpx solid rgba(255, 246, 224, 0.12);
+  line-height: 1;
+}
+.chat-pick-btn:active {
+  background: rgba(255, 214, 107, 0.2);
+}
+
+/* 操作区 */
+.action-zone {
+  position: relative;
+  z-index: 10;
+}
+
+.chat-trigger {
+  position: absolute;
+  right: 24rpx;
+  top: -88rpx;
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 50%;
+  background: rgba(20, 12, 40, 0.85);
+  border: 2rpx solid rgba(255, 214, 107, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 42rpx;
+  z-index: 11;
+}
+.chat-trigger:active {
+  transform: scale(0.95);
+}
+
+.wait-tip {
+  text-align: center;
+  font-size: 24rpx;
+  color: rgba(255, 246, 224, 0.6);
+  padding: 8rpx 0;
+  background: rgba(20, 12, 40, 0.5);
+}

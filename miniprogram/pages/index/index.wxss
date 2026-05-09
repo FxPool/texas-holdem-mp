@@ -1,0 +1,72 @@
+.page {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 200rpx 60rpx 80rpx;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.logo {
+  font-size: 220rpx;
+  line-height: 1;
+  filter: drop-shadow(0 8rpx 16rpx rgba(0,0,0,0.4));
+}
+
+.title {
+  font-size: 72rpx;
+  font-weight: 900;
+  color: #FFD66B;
+  letter-spacing: 8rpx;
+  text-shadow: 0 4rpx 0 rgba(0,0,0,0.3);
+}
+
+.subtitle {
+  font-size: 26rpx;
+  color: rgba(255, 246, 224, 0.7);
+}
+
+.actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.btn {
+  width: 100%;
+  height: 100rpx;
+  border-radius: 50rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32rpx;
+  font-weight: 800;
+}
+
+.btn.primary {
+  background: #FFD66B;
+  color: #4A2E00;
+  box-shadow: 0 6rpx 0 #E0A744;
+}
+
+.btn.primary:active { transform: translateY(2rpx); box-shadow: 0 4rpx 0 #E0A744; }
+
+.btn.ghost {
+  background: transparent;
+  color: rgba(255, 246, 224, 0.85);
+  border: 2rpx solid rgba(255, 246, 224, 0.35);
+}
+
+.footer {
+  font-size: 22rpx;
+  color: rgba(255, 246, 224, 0.4);
+}

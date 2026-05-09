@@ -1,0 +1,7 @@
+{
+  "component": true,
+  "usingComponents": {
+    "p-card": "../card/card",
+    "timer-ring": "../timer-ring/timer-ring"
+  }
+}

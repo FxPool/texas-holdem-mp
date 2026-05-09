@@ -1,0 +1,17 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/lobby/lobby",
+    "pages/table/table"
+  ],
+  "window": {
+    "backgroundTextStyle": "light",
+    "navigationBarBackgroundColor": "#2B1B4D",
+    "navigationBarTitleText": "德州扑克",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#2B1B4D"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

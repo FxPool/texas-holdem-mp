@@ -1,0 +1,16 @@
+<view class="page">
+  <view class="hero">
+    <view class="logo">🃏</view>
+    <text class="title">德州扑克</text>
+    <text class="subtitle">和朋友一起玩，娱乐至上</text>
+  </view>
+
+  <view class="actions">
+    <view class="btn primary" bindtap="onEnterLobby">进入大厅</view>
+    <view wx:if="{{showDevQuickPlay}}" class="btn ghost" bindtap="onQuickPlay">快速试玩牌桌（开发版）</view>
+  </view>
+
+  <view class="footer">
+    <text>仅供娱乐 · 虚拟筹码不可兑换</text>
+  </view>
+</view>

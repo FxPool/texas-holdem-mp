@@ -1,0 +1,34 @@
+# Caddy reverse-proxy for the texas-holdem game server.
+# Replace EXAMPLE_DOMAIN with your real domain. Caddy handles ACME / Let's
+# Encrypt automatically.
+#
+# WeChat MiniProgram requires HTTPS (request) and WSS (socket); Caddy
+# terminates TLS and proxies plain http/ws to the Go service.
+
+EXAMPLE_DOMAIN {
+    encode gzip
+
+    # Optional: drop a static file or HTML for the apex landing page.
+    # handle / {
+    #     respond "ok"
+    # }
+
+    @ws {
+        path /ws
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    handle @ws {
+        reverse_proxy game:18080
+    }
+
+    # Everything else (POST /login, GET /rooms, GET /health) is plain HTTP.
+    handle {
+        reverse_proxy game:18080
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}

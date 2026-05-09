@@ -1,0 +1,52 @@
+<view wx:if="{{visible}}" class="overlay" catchtap="onDismiss">
+  <view class="panel" catchtap="">
+    <view class="title-row">
+      <text class="title">{{uncontestedWinner ? '本手结束' : '摊牌'}}</text>
+      <view class="close-btn" bindtap="onDismiss">×</view>
+    </view>
+
+    <!-- 无摊牌（其他人都弃牌） -->
+    <view wx:if="{{uncontestedWinner}}" class="uncontested">
+      <text class="winner-name">🏆 {{uncontestedWinner}}</text>
+      <text class="winner-amount">+{{uncontestedAmount}}</text>
+      <text class="hint">其他玩家都弃牌了</text>
+    </view>
+
+    <!-- 摊牌：每个未弃牌玩家一行 -->
+    <view wx:else class="contestant-list">
+      <view
+        wx:for="{{contestants}}"
+        wx:key="userId"
+        wx:for-item="c"
+        class="contestant {{c.isWinner ? 'is-winner' : ''}}"
+      >
+        <view class="row-head">
+          <view class="avatar-bubble">
+            <text class="avatar-emoji">{{c.avatar}}</text>
+          </view>
+          <view class="head-meta">
+            <text class="nickname">{{c.nickname}}</text>
+            <text class="rank">{{rankCN[c.rankSlug] || c.rankSlug}}</text>
+          </view>
+          <view wx:if="{{c.isWinner}}" class="winner-pill">
+            <text class="trophy">🏆</text>
+            <text class="amount">+{{c.amountWon}}</text>
+          </view>
+        </view>
+        <view class="cards-row">
+          <view class="hole-cards">
+            <p-card wx:for="{{c.holeCards}}" wx:key="index" wx:for-item="card"
+              size="md" suit="{{card.suit}}" rank="{{card.rank}}" revealed="{{true}}" />
+          </view>
+          <text class="plus">+</text>
+          <view class="community-cards">
+            <p-card wx:for="{{community}}" wx:key="index" wx:for-item="card"
+              size="sm" suit="{{card.suit}}" rank="{{card.rank}}" revealed="{{true}}" />
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="continue-btn" bindtap="onDismiss">继续</view>
+  </view>
+</view>

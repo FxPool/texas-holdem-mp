@@ -1,0 +1,38 @@
+<view class="seat status-{{player.status}} {{isActive ? 'is-active' : ''}}" wx:if="{{player}}">
+  <!-- 对手手牌（背面），扇形夹在头像后方 -->
+  <view class="holecards" wx:if="{{player.status !== 'folded'}}">
+    <view class="hc hc-1"><p-card size="sm" revealed="{{false}}" /></view>
+    <view class="hc hc-2"><p-card size="sm" revealed="{{false}}" /></view>
+  </view>
+
+  <!-- 头像 -->
+  <view class="avatar-wrap">
+    <timer-ring wx:if="{{isActive}}" deadline="{{deadline}}" duration="{{30}}" />
+    <view class="avatar">
+      <text class="avatar-emoji">{{player.avatar}}</text>
+    </view>
+    <view wx:if="{{player.isDealer}}" class="badge badge-dealer">D</view>
+    <view wx:elif="{{player.isSmallBlind}}" class="badge badge-sb">SB</view>
+    <view wx:elif="{{player.isBigBlind}}" class="badge badge-bb">BB</view>
+  </view>
+
+  <!-- 信息卡 -->
+  <view class="info">
+    <text class="nickname">{{player.nickname}}</text>
+    <view class="chips-row">
+      <text class="chips-icon">●</text>
+      <text class="chips-num">{{player.chips}}</text>
+    </view>
+  </view>
+
+  <!-- 状态徽章 -->
+  <view wx:if="{{player.status === 'folded'}}" class="state-tag tag-fold">弃</view>
+  <view wx:if="{{player.status === 'all-in'}}" class="state-tag tag-allin">All-In</view>
+  <view wx:if="{{player.status === 'thinking'}}" class="state-tag tag-think">行动中</view>
+
+  <!-- 当前轮押注 -->
+  <view wx:if="{{player.betThisRound > 0}}" class="bet-pill">
+    <text class="bet-icon">●</text>
+    <text class="bet-num">{{player.betThisRound}}</text>
+  </view>
+</view>

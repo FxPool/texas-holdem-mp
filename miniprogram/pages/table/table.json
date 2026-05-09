@@ -1,0 +1,12 @@
+{
+  "navigationStyle": "custom",
+  "disableScroll": true,
+  "usingComponents": {
+    "p-seat": "../../components/seat/seat",
+    "p-pot": "../../components/pot/pot",
+    "p-community-cards": "../../components/community-cards/community-cards",
+    "p-action-bar": "../../components/action-bar/action-bar",
+    "p-card": "../../components/card/card",
+    "p-showdown-panel": "../../components/showdown-panel/showdown-panel"
+  }
+}
