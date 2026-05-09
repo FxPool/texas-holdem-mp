@@ -1,9 +1,25 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # Texas Hold'em Server — Interactive Installer
 # https://github.com/FxPool/texas-holdem-mp
 #
-set -e
+
+# When piped via `curl ... | sh`, the shell is sh/dash, not bash.
+# Detect this and ask the user to use bash instead.
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo ""
+    echo "  [!] This script requires bash. Please run with:"
+    echo ""
+    echo "      curl -fsSL <url> | sudo bash"
+    echo "    or:"
+    echo "      sudo bash install.sh"
+    echo ""
+    exit 1
+fi
+
+set -euo pipefail
+
+trap 'echo ""; echo "  [✗] Script failed at line $LINENO (exit code $?)"; echo "      Command: $BASH_COMMAND"; exit 1' ERR
 
 REPO="${REPO:-FxPool/texas-holdem-mp}"
 RELEASE_TAG="${RELEASE_TAG:-latest}"
@@ -655,9 +671,9 @@ case "$cmd" in
         if [ -t 0 ]; then
             main_menu
         else
+            detect_arch
             print_banner
             check_root
-            detect_arch
             info "Detected platform: ${BOLD}${PLATFORM}${RESET}"
             info "Non-interactive mode — running install"
             echo ""
@@ -675,7 +691,11 @@ Usage:
   sudo $0 uninstall
   sudo $0 start | stop | restart | logs | status | tune
 
+Remote install:
+  curl -fsSL <url>/install.sh | sudo DOMAIN=your.domain.com bash
+
 Environment:
+  DOMAIN=your.domain.com    domain name (required for non-interactive install)
   REPO=owner/name           override default repo (${REPO})
   RELEASE_TAG=vX.Y.Z        pin a release (default: latest)
   TARBALL_URL=https://...   bypass release URL composition entirely
