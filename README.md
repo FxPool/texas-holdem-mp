@@ -70,6 +70,10 @@ go build ./...       # 编译检查
 - **Docker Compose**（推荐）：Caddy 自动签发 Let's Encrypt 证书 + Go 服务器，一键 `docker compose up -d`
 - **systemd**：直接跑二进制，前面挂 Nginx/Caddy 处理 TLS
 
+```bash
+bash <(curl -s -L https://raw.githubusercontent.com/FxPool/texas-holdem-mp/main/deploy/install.sh)
+```
+
 ## 协议与隐私
 
 模板见 [docs/USER_AGREEMENT.md](docs/USER_AGREEMENT.md) 和 [docs/PRIVACY.md](docs/PRIVACY.md)。**正式上线前请咨询律师并填实占位项**。
