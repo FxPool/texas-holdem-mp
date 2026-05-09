@@ -1,14 +1,13 @@
 # 部署清单
 
-三条路径，按你的偏好选：
+两条路径：
 
-- **路线 A（推荐）· 一键安装脚本**：从 GitHub Release 下载预编译二进制，自动配 systemd + Caddy + TLS
-- 路线 B · Docker Compose
-- 路线 C · 手动 systemd
+- **路线 A（推荐）· 一键管理脚本** [install.sh](install.sh)：菜单式，覆盖安装/升级/启停/卸载/调优。从 GitHub Release 拉 `tar.gz` 解压。
+- 路线 B · Docker Compose（[docker-compose.yml](docker-compose.yml)）
 
 ## 准备
 
-- 一台公网机（1 vCPU / 1 GB RAM 起步够用），Debian 11/12 或 Ubuntu 22.04
+- 一台 Debian 11/12 或 Ubuntu 22.04 公网机（1 vCPU / 1 GB RAM 起步够用）
 - 一个域名解析到这台机器
 - 微信小程序后台 → 服务器域名 → 加：
   - `request 合法域名`：`https://你的域名`
@@ -16,88 +15,92 @@
 
 ---
 
-## 路线 A · 一键安装脚本（推荐）
+## 路线 A · 一键管理脚本
 
-### 1. 把二进制放到 GitHub
-
-**A 方案：用 GitHub Releases**（推荐）
+### 1. 在本地编译并发布到 GitHub Release
 
 ```bash
-# 本地交叉编译两个架构（已经做好了）
 cd server
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o texas-holdem-server-linux-amd64 ./cmd/server
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o texas-holdem-server-linux-arm64 ./cmd/server
+make dist                                  # 出 dist/*.tar.gz + SHA256SUMS
+make release VERSION=v0.1.0                # 一条龙：dist + 上传到 GitHub Release
 ```
 
-然后在 GitHub 仓库页面 → Releases → "Draft a new release" → 上传上面这两个文件作为 release assets，发布。
+`make release` 需要 [`gh` CLI](https://cli.github.com/)（`brew install gh && gh auth login`）。
+不想用 `gh` 的话，到 GitHub 网页 Release 页面手动把 `server/dist/*.tar.gz` 拖上去。
 
-**B 方案：直接放在 main 分支**
+### 2. 在服务器上跑脚本
 
-把两个文件 commit + push 到仓库根目录或 `server/` 下，安装脚本用 `--binary-url` 指定 raw 链接。
-
-### 2. 在服务器上跑安装脚本
-
-SSH 到服务器：
+最简单：直接 curl + 菜单：
 
 ```bash
-# 默认 GITHUB_REPO 是 jiangminghong/texas-holdem-mp，请改成你自己的
-curl -fsSL https://raw.githubusercontent.com/jiangminghong/texas-holdem-mp/main/deploy/install.sh \
-  | sudo GITHUB_REPO=你的用户名/你的仓库名 bash -s -- --domain www.zhoudegame.xyz
-```
-
-或者把 `install.sh` 上传后本地跑：
-
-```bash
-scp deploy/install.sh root@服务器IP:/tmp/
 ssh root@服务器IP
-
-# 用 latest release
-sudo bash /tmp/install.sh \
-  --domain www.zhoudegame.xyz \
-  --repo 你的用户名/你的仓库名
-
-# 或锁定某个版本
-sudo bash /tmp/install.sh \
-  --domain www.zhoudegame.xyz \
-  --repo 你的用户名/你的仓库名 \
-  --release-tag v0.1.0
-
-# 或直接给二进制 URL（绕开 release 机制）
-sudo bash /tmp/install.sh \
-  --domain www.zhoudegame.xyz \
-  --binary-url https://github.com/你/你/raw/main/server/texas-holdem-server-linux-amd64
+curl -fsSL https://raw.githubusercontent.com/FxPool/texas-holdem-mp/main/deploy/install.sh -o /usr/local/bin/texas-mgr
+chmod +x /usr/local/bin/texas-mgr
+sudo texas-mgr               # 进菜单
 ```
 
-脚本会：
+菜单选项：
 
-1. 创建 `texas` 系统用户
-2. 下载二进制到 `/usr/local/bin/texas-holdem-server`
-3. 生成 `AUTH_SECRET` 写入 `/etc/default/texas-holdem`（重跑保留旧值）
-4. 装 Caddy（如未装）+ 写 Caddyfile
-5. 装 systemd unit + 启动 + 验证
+```
+ 1) 安装 / 重装          —— 完整初始化（用户/二进制/sysctl/systemd/Caddy）
+ 2) 升级二进制           —— 拉新 release，零中断替换
+ 3) 启动
+ 4) 停止
+ 5) 重启
+ 6) 查看状态
+ 7) 实时日志（journalctl -f）
+ 8) 重新应用内核/ulimit 调优
+ 9) 卸载（保留数据）
+10) 卸载并清理（--purge，删环境文件+state+用户）
+ 0) 退出
+```
 
-### 3. 配置 wx 凭据（只在首次需要）
+也支持非交互式：
+
+```bash
+sudo texas-mgr install --domain www.zhoudegame.xyz
+sudo texas-mgr install --domain www.zhoudegame.xyz --release-tag v0.1.0
+sudo texas-mgr update
+sudo texas-mgr restart
+sudo texas-mgr logs -n 500
+sudo texas-mgr tune
+sudo texas-mgr uninstall            # 保留数据
+sudo texas-mgr uninstall --purge    # 全删
+```
+
+### 3. 脚本干了什么
+
+**首次安装**：
+1. 创建 `texas` 系统用户（无 home、无 shell）
+2. 从 GitHub Release 下载 `texas-holdem-server-linux-<arch>.tar.gz`，校验大小 + ELF 头，解压到 `/usr/local/bin/`
+3. 生成 `AUTH_SECRET` 写入 `/etc/default/texas-holdem`（重跑保留）
+4. 写 `/etc/sysctl.d/99-texas-holdem.conf`：`fs.file-max=1048576`、`net.core.somaxconn=65535`、TCP keepalive 等
+5. 写 `/etc/security/limits.d/texas-holdem.conf`：`nofile = 1048576`
+6. 写 systemd 单元 `LimitNOFILE=1048576`，启用 + 启动
+7. 装 Caddy（如未装）+ 写 Caddyfile + 自动签 Let's Encrypt
+8. 内外两次 health check
+
+**升级**：只重做第 2 步，保留所有配置和 state。
+
+**调优（tune）**：只重写 sysctl/limits + 重启服务让 LimitNOFILE 生效。
+
+### 4. 配置 wx 凭据（首次需要）
 
 ```bash
 sudo nano /etc/default/texas-holdem
 # 填入 WX_APPID 和 WX_APPSECRET
-sudo systemctl restart texas-holdem
+sudo texas-mgr restart
 ```
 
-### 4. 升级（之后每次发新版本）
+### 5. 升级流程
 
-直接重跑同一条命令 —— 旧 `AUTH_SECRET` 和 `WX_*` 自动保留：
+发布新 release 后：
 
 ```bash
-sudo bash /tmp/install.sh --domain www.zhoudegame.xyz --repo 你的用户名/你的仓库名
+sudo texas-mgr update
 ```
 
-### 5. 卸载
-
-```bash
-sudo bash /tmp/uninstall.sh           # 保留数据
-sudo bash /tmp/uninstall.sh --purge   # 连数据一起删
-```
+旧 `AUTH_SECRET` / `WX_*` 自动保留 —— 玩家不会被强制重新登录。
 
 ---
 
@@ -118,12 +121,6 @@ git pull
 docker compose build game
 docker compose up -d
 ```
-
----
-
-## 路线 C · 手动 systemd
-
-如果你不信任脚本，按 `install.sh` 里的步骤手工跑也可以。具体可以打开 [install.sh](install.sh) 阅读 —— 它本身就是文档化的步骤清单。
 
 ---
 
@@ -150,3 +147,4 @@ curl -X POST https://你的域名/login \
 2. **域名没备案**：开发期 `curl` 测能通，但正式发布的小程序请求会被运营商拦
 3. **DNS 还没生效**：`dig 你的域名 +short` 应该返回服务器 IP；如果不返回先等 DNS 传播
 4. **`AUTH_SECRET` 千万别丢**：丢了所有玩家 token 失效。脚本会持久化到 `/etc/default/texas-holdem`，注意备份这个文件。
+5. **改了 `/etc/security/limits.d/`**：只对**新登录的会话**生效。systemd 服务通过单元里的 `LimitNOFILE=` 立即生效，但你 ssh 会话要重新登录才能看到 `ulimit -n` 变化。

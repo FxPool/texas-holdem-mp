@@ -1,17 +1,13 @@
 # texas-holdem server build automation.
 #
 # Common usage:
-#   make                      # build for current platform → ./texas-holdem-server
-#   make dist                 # cross-compile linux/amd64 + linux/arm64 → dist/
+#   make                      # 本地平台编译 → ./texas-holdem-server
+#   make dist                 # 交叉编译 + 打 tar.gz → dist/
 #   make checksums            # SHA256SUMS for dist/
 #   make release VERSION=v0.1.0
-#                             # build + upload to GitHub Release via `gh` CLI
-#   make test                 # go test ./...
+#                             # build + 上传到 GitHub Release
+#   make test
 #   make clean
-#
-# Cross-compilation is fully static (CGO_ENABLED=0). The binaries live in
-# dist/ and follow GitHub release naming conventions so install.sh picks them
-# up automatically.
 
 BIN     := texas-holdem-server
 PKG     := ./cmd/server
@@ -21,21 +17,19 @@ GO      ?= go
 LDFLAGS := -s -w
 GOFLAGS := -trimpath
 
-# Find every Go file (incl. tests) for change detection. Excluding dist/ so the
-# build output doesn't trigger itself in a re-run.
 GOSRC := $(shell find . -name '*.go' -not -path './$(DIST)/*' 2>/dev/null)
 
-.PHONY: build dist linux-amd64 linux-arm64 checksums release test vet tidy clean help
+.PHONY: build dist linux-amd64 linux-arm64 archives checksums release test vet tidy clean help
 
-# Default target: developer iteration build for the current host platform.
+# 默认目标：本地平台开发用编译
 build: $(BIN)
 
 $(BIN): $(GOSRC)
 	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $(BIN) $(PKG)
 	@ls -lh $(BIN)
 
-# Cross-compile both Linux architectures for distribution.
-dist: linux-amd64 linux-arm64
+# 发布产物：两个 Linux 架构 + 各自打成 tar.gz + SHA256SUMS
+dist: archives checksums
 
 linux-amd64: $(DIST)/$(BIN)-linux-amd64
 linux-arm64: $(DIST)/$(BIN)-linux-arm64
@@ -52,18 +46,30 @@ $(DIST)/$(BIN)-linux-arm64: $(GOSRC)
 		$(GO) build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $@ $(PKG)
 	@ls -lh $@
 
-# SHA256 manifest. install.sh on the server can fetch this to verify downloads.
+archives: $(DIST)/$(BIN)-linux-amd64.tar.gz $(DIST)/$(BIN)-linux-arm64.tar.gz
+
+# 把二进制打包成 tar.gz。tar 内部只放二进制，不带目录前缀，便于 install.sh
+# 直接 tar -xzf 后拿到 ./$(BIN)-linux-<arch>。
+$(DIST)/$(BIN)-linux-amd64.tar.gz: $(DIST)/$(BIN)-linux-amd64
+	tar -czf $@ -C $(DIST) $(BIN)-linux-amd64
+	@ls -lh $@
+
+$(DIST)/$(BIN)-linux-arm64.tar.gz: $(DIST)/$(BIN)-linux-arm64
+	tar -czf $@ -C $(DIST) $(BIN)-linux-arm64
+	@ls -lh $@
+
 checksums: $(DIST)/SHA256SUMS
 
-$(DIST)/SHA256SUMS: $(DIST)/$(BIN)-linux-amd64 $(DIST)/$(BIN)-linux-arm64
-	cd $(DIST) && shasum -a 256 $(BIN)-* > SHA256SUMS
+# SHA256 manifest 覆盖 tar.gz（install.sh 用它做完整性校验）
+$(DIST)/SHA256SUMS: $(DIST)/$(BIN)-linux-amd64.tar.gz $(DIST)/$(BIN)-linux-arm64.tar.gz
+	cd $(DIST) && shasum -a 256 $(BIN)-linux-*.tar.gz > SHA256SUMS
 	@echo "---"
 	@cat $@
 
-# Publish a GitHub release. Needs the `gh` CLI authenticated once.
+# 发版：dist + 通过 gh CLI 创建 GitHub Release，上传 tar.gz + SHA256SUMS
 #   make release VERSION=v0.1.0
 VERSION ?=
-release: dist checksums
+release: dist
 	@command -v gh >/dev/null 2>&1 || { \
 		echo "需要 GitHub CLI: brew install gh && gh auth login" >&2; exit 1; }
 	@[ -n "$(VERSION)" ] || { \
@@ -71,8 +77,8 @@ release: dist checksums
 	gh release create $(VERSION) \
 		--title "$(VERSION)" \
 		--generate-notes \
-		$(DIST)/$(BIN)-linux-amd64 \
-		$(DIST)/$(BIN)-linux-arm64 \
+		$(DIST)/$(BIN)-linux-amd64.tar.gz \
+		$(DIST)/$(BIN)-linux-arm64.tar.gz \
 		$(DIST)/SHA256SUMS
 
 test:
@@ -82,7 +88,6 @@ vet:
 	$(GO) vet ./...
 	$(GO) build ./...
 
-# Tidy + verify go.mod/go.sum.
 tidy:
 	$(GO) mod tidy
 	$(GO) mod verify
@@ -93,17 +98,17 @@ clean:
 help:
 	@echo "Targets:"
 	@echo "  build         本地平台编译（默认） → ./$(BIN)"
-	@echo "  dist          交叉编译 linux/amd64 + linux/arm64 → $(DIST)/"
-	@echo "  linux-amd64   只编 linux/amd64"
-	@echo "  linux-arm64   只编 linux/arm64"
+	@echo "  dist          交叉编译 + 打 tar.gz + 校验和 → $(DIST)/"
+	@echo "  linux-amd64   只编 linux/amd64 二进制"
+	@echo "  linux-arm64   只编 linux/arm64 二进制"
+	@echo "  archives      只把已编译的二进制打成 tar.gz"
 	@echo "  checksums     生成 $(DIST)/SHA256SUMS"
-	@echo "  release       dist + checksums + 上传到 GitHub Release"
-	@echo "                需要：gh CLI 已登录、VERSION=v0.x.y"
+	@echo "  release       dist + 上传 GitHub Release（VERSION=v0.x.y, 需要 gh CLI）"
 	@echo "  test          go test ./..."
 	@echo "  vet           go vet + go build"
 	@echo "  tidy          go mod tidy + verify"
 	@echo "  clean         删除 $(DIST)/ 和本地二进制"
 	@echo ""
 	@echo "示例:"
-	@echo "  make dist                       # 出两个 Linux 二进制到 dist/"
+	@echo "  make dist                       # 交叉编译两个架构并打包"
 	@echo "  make release VERSION=v0.1.0     # 一条龙发布"

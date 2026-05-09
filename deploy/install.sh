@@ -1,53 +1,60 @@
 #!/usr/bin/env bash
-# 一键安装/升级 texas-holdem 服务到 Debian/Ubuntu。
+# texas-holdem 服务管理脚本 —— 安装 / 升级 / 启停 / 卸载 一站式
 #
-# 使用：
-#   sudo bash install.sh                                  # 交互式
-#   sudo bash install.sh --domain www.example.com         # 一行搞定
-#   sudo bash install.sh --domain www.example.com --release-tag v0.1.0
+# 交互菜单：
+#   sudo bash install.sh
 #
-# 重新运行此脚本会保留已有的 AUTH_SECRET（不让旧 token 失效）和已配置的
-# WX_APPID/WX_APPSECRET，只更新二进制 + Caddyfile + systemd 单元。
+# 直接子命令：
+#   sudo bash install.sh install [--domain X] [--release-tag vX.Y.Z]
+#   sudo bash install.sh update                         # 拉新二进制 + 重启
+#   sudo bash install.sh start | stop | restart | status
+#   sudo bash install.sh logs [-n 200]
+#   sudo bash install.sh tune                           # 重新写 sysctl/limits
+#   sudo bash install.sh uninstall [--purge]
 #
-# 需要 root（或 sudo）。仅在 Debian 11/12、Ubuntu 22.04 上测试过。
+# 重新运行 install 子命令会保留 AUTH_SECRET / WX_APPID / WX_APPSECRET，
+# 不让旧 token 失效。
+#
+# 仅在 Debian 11/12、Ubuntu 22.04 上测试。需要 root（或 sudo）。
 
 set -euo pipefail
 
 # ============================================================
-# 配置（按需修改）
+# 配置
 # ============================================================
 
-# GitHub owner/repo —— 改成你自己的仓库
-GITHUB_REPO="${GITHUB_REPO:-jiangminghong/texas-holdem-mp}"
-
-# 默认从 release 拿；不传 --release-tag 时读最新 release。
+GITHUB_REPO="${GITHUB_REPO:-FxPool/texas-holdem-mp}"
 RELEASE_TAG="${RELEASE_TAG:-latest}"
-
-# 直接指定二进制 URL（覆盖以上 release 模式）
-BINARY_URL="${BINARY_URL:-}"
-
+TARBALL_URL="${TARBALL_URL:-}"
 DOMAIN="${DOMAIN:-}"
+
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="texas-holdem-server"
 RUN_USER="texas"
 ENV_FILE="/etc/default/texas-holdem"
 SYSTEMD_UNIT="/etc/systemd/system/texas-holdem.service"
 CADDYFILE="/etc/caddy/Caddyfile"
+SYSCTL_FILE="/etc/sysctl.d/99-texas-holdem.conf"
+LIMITS_FILE="/etc/security/limits.d/texas-holdem.conf"
 STATE_DIR="/var/lib/texas-holdem"
 LISTEN_ADDR="127.0.0.1:18080"
 
 # ============================================================
-# 工具
+# 输出
 # ============================================================
 
-GREEN=$'\033[0;32m'
-YELLOW=$'\033[0;33m'
-RED=$'\033[0;31m'
-RESET=$'\033[0m'
+if [[ -t 1 ]]; then
+    GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'; RED=$'\033[0;31m'
+    BLUE=$'\033[0;34m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
+else
+    GREEN=''; YELLOW=''; RED=''; BLUE=''; BOLD=''; RESET=''
+fi
 
 step()  { printf "${GREEN}==>${RESET} %s\n" "$*"; }
+info()  { printf "${BLUE} i ${RESET} %s\n" "$*"; }
 warn()  { printf "${YELLOW}!! ${RESET} %s\n" "$*" >&2; }
 die()   { printf "${RED}xx ${RESET} %s\n" "$*" >&2; exit 1; }
+hr()    { printf '%s\n' "----------------------------------------------------"; }
 
 require_root() {
     if [[ "${EUID}" -ne 0 ]]; then
@@ -56,159 +63,179 @@ require_root() {
 }
 
 require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || die "缺少 $1，请先 apt install -y $2"
+    command -v "$1" >/dev/null 2>&1 || die "缺少 $1，请先安装"
+}
+
+require_systemd() {
+    [[ -d /run/systemd/system ]] || die "需要 systemd（当前系统未运行 systemd）"
+}
+
+detect_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        *) die "不支持的架构: $(uname -m)（仅支持 amd64/arm64）" ;;
+    esac
 }
 
 # ============================================================
-# 解析参数
+# 各步骤函数
 # ============================================================
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --domain) DOMAIN="$2"; shift 2 ;;
-        --release-tag) RELEASE_TAG="$2"; shift 2 ;;
-        --binary-url) BINARY_URL="$2"; shift 2 ;;
-        --repo) GITHUB_REPO="$2"; shift 2 ;;
-        -h|--help)
-            grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -25
-            exit 0
-            ;;
-        *) die "未知参数: $1" ;;
-    esac
-done
+ensure_user_and_dirs() {
+    if id -u "${RUN_USER}" >/dev/null 2>&1; then
+        info "用户 ${RUN_USER} 已存在"
+    else
+        step "创建运行用户 ${RUN_USER}"
+        useradd --system --no-create-home --shell /usr/sbin/nologin "${RUN_USER}"
+    fi
+    mkdir -p "${STATE_DIR}"
+    chown "${RUN_USER}:${RUN_USER}" "${STATE_DIR}"
+}
 
-require_root
-require_cmd curl curl
-
-# ============================================================
-# 1. 询问域名
-# ============================================================
-
-if [[ -z "${DOMAIN}" ]]; then
-    read -rp "请输入域名（如 www.zhoudegame.xyz）: " DOMAIN
-fi
-[[ -z "${DOMAIN}" ]] && die "域名不能为空"
-
-step "目标域名: ${DOMAIN}"
-
-# ============================================================
-# 2. 检测系统架构
-# ============================================================
-
-ARCH="$(uname -m)"
-case "${ARCH}" in
-    x86_64|amd64) ARCH_TAG="amd64" ;;
-    aarch64|arm64) ARCH_TAG="arm64" ;;
-    *) die "不支持的架构: ${ARCH}（仅支持 amd64/arm64）" ;;
-esac
-step "架构: ${ARCH_TAG}"
-
-# ============================================================
-# 3. 计算下载 URL
-# ============================================================
-
-if [[ -z "${BINARY_URL}" ]]; then
+resolve_tarball_url() {
+    local arch="$1"
+    if [[ -n "${TARBALL_URL}" ]]; then
+        echo "${TARBALL_URL}"
+        return
+    fi
     if [[ "${RELEASE_TAG}" == "latest" ]]; then
-        BINARY_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/texas-holdem-server-linux-${ARCH_TAG}"
+        echo "https://github.com/${GITHUB_REPO}/releases/latest/download/${BINARY_NAME}-linux-${arch}.tar.gz"
     else
-        BINARY_URL="https://github.com/${GITHUB_REPO}/releases/download/${RELEASE_TAG}/texas-holdem-server-linux-${ARCH_TAG}"
+        echo "https://github.com/${GITHUB_REPO}/releases/download/${RELEASE_TAG}/${BINARY_NAME}-linux-${arch}.tar.gz"
     fi
-fi
-step "下载地址: ${BINARY_URL}"
+}
 
-# ============================================================
-# 4. 创建运行用户
-# ============================================================
+# 下载并解压二进制；服务在跑会先停后替换
+download_and_install_binary() {
+    local arch url tmpdir tar_path bin_path size magic
+    arch="$(detect_arch)"
+    url="$(resolve_tarball_url "${arch}")"
+    step "下载 ${url}"
 
-if id -u "${RUN_USER}" >/dev/null 2>&1; then
-    step "用户 ${RUN_USER} 已存在，跳过"
-else
-    step "创建运行用户 ${RUN_USER}"
-    useradd --system --no-create-home --shell /usr/sbin/nologin "${RUN_USER}"
-fi
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "${tmpdir}"' RETURN
 
-mkdir -p "${STATE_DIR}"
-chown "${RUN_USER}:${RUN_USER}" "${STATE_DIR}"
+    tar_path="${tmpdir}/binary.tar.gz"
+    if ! curl -fsSL --retry 3 -o "${tar_path}" "${url}"; then
+        die "下载失败。检查 GITHUB_REPO（${GITHUB_REPO}）和 release（${RELEASE_TAG}）是否已发布。"
+    fi
 
-# ============================================================
-# 5. 下载二进制
-# ============================================================
+    size="$(wc -c < "${tar_path}")"
+    if [[ "${size}" -lt 100000 ]]; then
+        warn "下载文件太小（${size} 字节），可能是 GitHub 错误页"
+        head -c 200 "${tar_path}" >&2
+        die "下载文件不像有效的 tar.gz"
+    fi
 
-TMP_BIN="$(mktemp)"
-trap 'rm -f "${TMP_BIN}"' EXIT
+    step "解压"
+    tar -xzf "${tar_path}" -C "${tmpdir}"
+    bin_path="${tmpdir}/${BINARY_NAME}-linux-${arch}"
+    [[ -f "${bin_path}" ]] || die "tar 包内没找到 ${BINARY_NAME}-linux-${arch}"
 
-step "下载二进制…"
-if ! curl -fsSL -o "${TMP_BIN}" "${BINARY_URL}"; then
-    die "下载失败。检查 GITHUB_REPO（当前: ${GITHUB_REPO}）和 release 是否已发布。"
-fi
+    magic="$(head -c 4 "${bin_path}" | od -An -t x1 | tr -d ' \n')"
+    [[ "${magic}" == "7f454c46" ]] || die "解压出的文件不是 ELF（前 4 字节 ${magic}）"
 
-# 简单校验：必须是 ELF 文件（前 4 字节 7f 45 4c 46）
-MAGIC="$(head -c 4 "${TMP_BIN}" | od -An -t x1 | tr -d ' \n')"
-if [[ "${MAGIC}" != "7f454c46" ]]; then
-    die "下载内容不是 ELF 可执行文件（开头字节 ${MAGIC}），可能是 404 HTML 页面。检查 URL: ${BINARY_URL}"
-fi
+    if systemctl is-active --quiet texas-holdem 2>/dev/null; then
+        step "停止运行中的服务以替换二进制"
+        systemctl stop texas-holdem
+    fi
 
-# 停服（如已存在）以替换二进制
-if systemctl is-active --quiet texas-holdem 2>/dev/null; then
-    step "停止运行中的服务以替换二进制"
-    systemctl stop texas-holdem
-fi
+    install -m 0755 -o root -g root "${bin_path}" "${INSTALL_DIR}/${BINARY_NAME}"
+    step "二进制就位: ${INSTALL_DIR}/${BINARY_NAME} ($(du -h "${INSTALL_DIR}/${BINARY_NAME}" | cut -f1))"
+}
 
-install -m 0755 -o root -g root "${TMP_BIN}" "${INSTALL_DIR}/${BINARY_NAME}"
-step "二进制就位: ${INSTALL_DIR}/${BINARY_NAME}"
+write_env_file() {
+    local existing_secret="" existing_appid="" existing_appsecret=""
+    if [[ -f "${ENV_FILE}" ]]; then
+        existing_secret="$(awk -F= '/^AUTH_SECRET=/{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" || true)"
+        existing_appid="$(awk -F= '/^WX_APPID=/{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" || true)"
+        existing_appsecret="$(awk -F= '/^WX_APPSECRET=/{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" || true)"
+    fi
 
-# ============================================================
-# 6. 写环境文件（保留旧 AUTH_SECRET / WX_APPID / WX_APPSECRET）
-# ============================================================
-
-EXISTING_SECRET=""
-EXISTING_WX_APPID=""
-EXISTING_WX_APPSECRET=""
-if [[ -f "${ENV_FILE}" ]]; then
-    EXISTING_SECRET="$(awk -F= '/^AUTH_SECRET=/{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" || true)"
-    EXISTING_WX_APPID="$(awk -F= '/^WX_APPID=/{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" || true)"
-    EXISTING_WX_APPSECRET="$(awk -F= '/^WX_APPSECRET=/{print substr($0, index($0, "=")+1)}' "${ENV_FILE}" || true)"
-fi
-
-if [[ -z "${EXISTING_SECRET}" ]]; then
-    if command -v openssl >/dev/null 2>&1; then
-        EXISTING_SECRET="$(openssl rand -hex 32)"
+    if [[ -z "${existing_secret}" ]]; then
+        if command -v openssl >/dev/null 2>&1; then
+            existing_secret="$(openssl rand -hex 32)"
+        else
+            existing_secret="$(head -c 32 /dev/urandom | xxd -p -c 64)"
+        fi
+        step "生成新的 AUTH_SECRET"
     else
-        EXISTING_SECRET="$(head -c 32 /dev/urandom | xxd -p -c 64)"
+        info "保留已存在的 AUTH_SECRET"
     fi
-    step "生成新的 AUTH_SECRET"
-else
-    step "保留已存在的 AUTH_SECRET"
-fi
 
-cat > "${ENV_FILE}" <<EOF
+    cat > "${ENV_FILE}" <<EOF
 # texas-holdem 服务环境变量
 # 生成时间: $(date -Iseconds)
 ADDR=${LISTEN_ADDR}
-AUTH_SECRET=${EXISTING_SECRET}
+AUTH_SECRET=${existing_secret}
 AUTH_TTL=168h
 AUTH_REQUIRED=1
 ALLOWED_ORIGINS=
-WX_APPID=${EXISTING_WX_APPID}
-WX_APPSECRET=${EXISTING_WX_APPSECRET}
+WX_APPID=${existing_appid}
+WX_APPSECRET=${existing_appsecret}
 STATE_FILE=${STATE_DIR}/state.json
 STATE_SAVE_INTERVAL=30s
 EOF
 
-chmod 640 "${ENV_FILE}"
-chown root:"${RUN_USER}" "${ENV_FILE}"
-step "环境文件: ${ENV_FILE}"
+    chmod 640 "${ENV_FILE}"
+    chown root:"${RUN_USER}" "${ENV_FILE}"
+    info "环境文件: ${ENV_FILE}"
 
-if [[ -z "${EXISTING_WX_APPID}" ]]; then
-    warn "WX_APPID/WX_APPSECRET 未配置，/login 将运行在 DEV 模式"
-    warn "上线前请编辑 ${ENV_FILE} 填入真实凭据并 systemctl restart texas-holdem"
-fi
+    if [[ -z "${existing_appid}" ]]; then
+        warn "WX_APPID/WX_APPSECRET 未配置，/login 走 DEV 模式（信任客户端 uid）"
+        warn "正式上线请编辑 ${ENV_FILE} 并 systemctl restart texas-holdem"
+    fi
+}
 
-# ============================================================
-# 7. systemd 单元
-# ============================================================
+# 内核 + ulimit 调优：高并发 WebSocket 必备
+apply_sysctl_and_limits() {
+    step "写入内核网络参数 ${SYSCTL_FILE}"
+    cat > "${SYSCTL_FILE}" <<EOF
+# texas-holdem: 高并发 WebSocket / 长连接调优
+# 系统全局打开文件数上限（含 socket）
+fs.file-max = 1048576
+# accept 队列长度
+net.core.somaxconn = 65535
+# SYN 队列长度
+net.ipv4.tcp_max_syn_backlog = 65535
+# 设备 backlog
+net.core.netdev_max_backlog = 16384
+# 端口范围（出向连接用）
+net.ipv4.ip_local_port_range = 1024 65535
+# 复用 TIME_WAIT 端口
+net.ipv4.tcp_tw_reuse = 1
+# 缩短 FIN_WAIT_2
+net.ipv4.tcp_fin_timeout = 15
+# 长连接保活
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 6
+# socket 缓冲
+net.core.rmem_default = 262144
+net.core.wmem_default = 262144
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+EOF
 
-cat > "${SYSTEMD_UNIT}" <<EOF
+    sysctl -p "${SYSCTL_FILE}" >/dev/null
+    info "已应用 sysctl 参数"
+
+    step "写入 ulimit ${LIMITS_FILE}"
+    cat > "${LIMITS_FILE}" <<EOF
+# texas-holdem: 提升单进程最大打开文件数
+*       soft    nofile  1048576
+*       hard    nofile  1048576
+root    soft    nofile  1048576
+root    hard    nofile  1048576
+${RUN_USER}  soft  nofile  1048576
+${RUN_USER}  hard  nofile  1048576
+EOF
+    info "已写入 limits（注意：limits.conf 改动只对新登录会话生效；systemd 服务通过 LimitNOFILE 立即生效）"
+}
+
+write_systemd_unit() {
+    cat > "${SYSTEMD_UNIT}" <<EOF
 [Unit]
 Description=Texas Holdem WS server
 After=network-online.target
@@ -222,6 +249,10 @@ EnvironmentFile=${ENV_FILE}
 ExecStart=${INSTALL_DIR}/${BINARY_NAME}
 Restart=on-failure
 RestartSec=2s
+
+# 资源上限（高并发 WS）
+LimitNOFILE=1048576
+LimitNPROC=65535
 
 # 硬化
 NoNewPrivileges=true
@@ -241,16 +272,16 @@ ReadWritePaths=${STATE_DIR}
 [Install]
 WantedBy=multi-user.target
 EOF
+    systemctl daemon-reload
+    info "systemd unit: ${SYSTEMD_UNIT}"
+}
 
-systemctl daemon-reload
-step "systemd 单元: ${SYSTEMD_UNIT}"
-
-# ============================================================
-# 8. 安装并配置 Caddy
-# ============================================================
-
-if ! command -v caddy >/dev/null 2>&1; then
-    step "安装 Caddy（首次）"
+install_caddy_if_missing() {
+    if command -v caddy >/dev/null 2>&1; then
+        info "Caddy 已安装"
+        return
+    fi
+    step "安装 Caddy"
     apt-get update -qq
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gpg
     if [[ ! -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg ]]; then
@@ -263,22 +294,21 @@ if ! command -v caddy >/dev/null 2>&1; then
     fi
     apt-get update -qq
     apt-get install -y caddy
-else
-    step "Caddy 已安装，跳过 apt"
-fi
+}
 
-# 写 Caddyfile
-APEX_DOMAIN="${DOMAIN#www.}"
-HOSTS="${DOMAIN}"
-if [[ "${APEX_DOMAIN}" != "${DOMAIN}" ]]; then
-    HOSTS="${DOMAIN}, ${APEX_DOMAIN}"
-fi
+write_caddyfile() {
+    local domain="$1"
+    local apex="${domain#www.}"
+    local hosts="${domain}"
+    if [[ "${apex}" != "${domain}" ]]; then
+        hosts="${domain}, ${apex}"
+    fi
 
-mkdir -p /var/log/caddy
-chown caddy:caddy /var/log/caddy 2>/dev/null || true
+    mkdir -p /var/log/caddy
+    chown caddy:caddy /var/log/caddy 2>/dev/null || true
 
-cat > "${CADDYFILE}" <<EOF
-${HOSTS} {
+    cat > "${CADDYFILE}" <<EOF
+${hosts} {
     encode gzip
 
     @ws {
@@ -300,63 +330,244 @@ ${HOSTS} {
     }
 }
 EOF
+    info "Caddyfile: ${CADDYFILE}"
+    caddy validate --config "${CADDYFILE}" >/dev/null
+}
 
-step "Caddyfile: ${CADDYFILE}"
-caddy validate --config "${CADDYFILE}" >/dev/null
+verify_health() {
+    step "本地探测 http://${LISTEN_ADDR}/health"
+    if curl -fsS "http://${LISTEN_ADDR}/health" 2>/dev/null | grep -q ok; then
+        info "✅ 内部健康检查通过"
+    else
+        warn "内部探测失败，看 journalctl -u texas-holdem -n 50"
+    fi
+
+    if [[ -n "${DOMAIN}" ]]; then
+        step "外部探测 https://${DOMAIN}/health"
+        if curl -fsS --max-time 10 "https://${DOMAIN}/health" 2>/dev/null | grep -q ok; then
+            info "✅ 外部健康检查通过"
+        else
+            warn "外部探测未通过，可能原因："
+            warn "  1) DNS 还没生效（dig ${DOMAIN} +short）"
+            warn "  2) Caddy 还在签证书（journalctl -u caddy -f）"
+            warn "  3) 防火墙没放 80/443"
+        fi
+    fi
+}
 
 # ============================================================
-# 9. 启动
+# 子命令
 # ============================================================
 
-step "启动 texas-holdem"
-systemctl enable --now texas-holdem
-sleep 1
-systemctl status texas-holdem --no-pager --lines=5 || true
+cmd_install() {
+    require_root
+    require_systemd
+    require_cmd curl curl
+    require_cmd tar tar
 
-step "重启 Caddy"
-systemctl enable caddy
-systemctl restart caddy
-sleep 2
+    if [[ -z "${DOMAIN}" ]]; then
+        read -rp "请输入域名（如 www.zhoudegame.xyz）: " DOMAIN
+    fi
+    [[ -z "${DOMAIN}" ]] && die "域名不能为空"
 
-# ============================================================
-# 10. 验证
-# ============================================================
+    info "目标域名:  ${DOMAIN}"
+    info "架构:      $(detect_arch)"
+    info "下载源:    $(resolve_tarball_url "$(detect_arch)")"
+    hr
 
-step "本地探测 ${LISTEN_ADDR}/health"
-if curl -fsS "http://${LISTEN_ADDR}/health" | grep -q ok; then
-    step "✅ 内部健康检查通过"
-else
-    warn "内部探测失败，检查 journalctl -u texas-holdem -n 50"
-fi
+    ensure_user_and_dirs
+    download_and_install_binary
+    write_env_file
+    apply_sysctl_and_limits
+    write_systemd_unit
+    install_caddy_if_missing
+    write_caddyfile "${DOMAIN}"
 
-step "外部探测 https://${DOMAIN}/health（需要域名 DNS 已解析、80/443 开放、Caddy 签证书完成）"
-if curl -fsS --max-time 10 "https://${DOMAIN}/health" 2>/dev/null | grep -q ok; then
-    step "✅ 外部健康检查通过"
-else
-    warn "外部探测未通过。可能原因："
-    warn "  1) DNS 还没生效（dig ${DOMAIN} +short）"
-    warn "  2) Caddy 还在签证书中（journalctl -u caddy -n 50 -f）"
-    warn "  3) 防火墙没放 80/443"
-fi
+    step "启动 texas-holdem"
+    systemctl enable --now texas-holdem
+    sleep 1
 
-cat <<EOF
+    step "重启 Caddy"
+    systemctl enable caddy
+    systemctl restart caddy
+    sleep 2
+
+    hr
+    verify_health
+
+    cat <<EOF
 
 ${GREEN}===== 完成 =====${RESET}
-
-服务地址:
-  https://${DOMAIN}/health     -> 健康检查
-  https://${DOMAIN}/rooms      -> 房间列表
-  https://${DOMAIN}/login      -> 登录（POST）
-  wss://${DOMAIN}/ws           -> WebSocket
-
-常用命令:
-  systemctl status texas-holdem
-  journalctl -u texas-holdem -f
-  systemctl restart texas-holdem
-  systemctl restart caddy
-  cat ${ENV_FILE}
-
-升级（直接重跑此脚本）:
-  sudo bash install.sh --domain ${DOMAIN}
-
+  https://${DOMAIN}/health
+  https://${DOMAIN}/rooms
+  wss://${DOMAIN}/ws
 EOF
+}
+
+cmd_update() {
+    require_root
+    require_systemd
+    require_cmd curl curl
+    require_cmd tar tar
+
+    [[ -f "${ENV_FILE}" ]] || die "尚未安装。先运行 install。"
+    info "升级到 release: ${RELEASE_TAG}"
+    download_and_install_binary
+    systemctl start texas-holdem
+    sleep 1
+    systemctl status texas-holdem --no-pager --lines=5 || true
+    verify_health
+}
+
+cmd_start()   { require_root; systemctl start texas-holdem;   systemctl status texas-holdem --no-pager --lines=5; }
+cmd_stop()    { require_root; systemctl stop texas-holdem;    systemctl status texas-holdem --no-pager --lines=5 || true; }
+cmd_restart() { require_root; systemctl restart texas-holdem; systemctl status texas-holdem --no-pager --lines=5; verify_health; }
+cmd_status()  {
+    systemctl status texas-holdem --no-pager --lines=20 || true
+    hr
+    systemctl status caddy --no-pager --lines=5 || true
+}
+
+cmd_logs() {
+    local n="${1:-200}"
+    journalctl -u texas-holdem -n "${n}" --no-pager
+}
+
+cmd_tune() {
+    require_root
+    apply_sysctl_and_limits
+    if systemctl is-active --quiet texas-holdem; then
+        warn "重启 texas-holdem 让 LimitNOFILE 生效"
+        systemctl restart texas-holdem
+    fi
+}
+
+cmd_uninstall() {
+    require_root
+    local purge="${1:-}"
+    warn "即将卸载 texas-holdem"
+    if [[ "${purge}" != "--purge" && "${purge}" != "-y" ]]; then
+        read -rp "确认卸载？(y/N): " ans
+        [[ "${ans}" =~ ^[Yy]$ ]] || { info "已取消"; return; }
+    fi
+
+    systemctl disable --now texas-holdem 2>/dev/null || true
+    rm -f "${SYSTEMD_UNIT}"
+    rm -f "${INSTALL_DIR}/${BINARY_NAME}"
+    rm -f "${SYSCTL_FILE}"
+    rm -f "${LIMITS_FILE}"
+    sysctl --system >/dev/null 2>&1 || true
+    systemctl daemon-reload
+
+    if [[ "${purge}" == "--purge" ]]; then
+        rm -f "${ENV_FILE}"
+        rm -rf "${STATE_DIR}"
+        userdel "${RUN_USER}" 2>/dev/null || true
+        warn "已 purge：环境文件 / 状态 / 用户全部删除"
+    else
+        info "保留 ${ENV_FILE} 与 ${STATE_DIR}（重新安装会复用 AUTH_SECRET 与玩家筹码）"
+        info "如需彻底删除：sudo bash $0 uninstall --purge"
+    fi
+
+    info "Caddyfile 仍引用 texas-holdem，如不再需要请手工编辑 ${CADDYFILE}"
+}
+
+# ============================================================
+# 菜单
+# ============================================================
+
+show_menu() {
+    require_root
+    while true; do
+        clear
+        cat <<EOF
+${BOLD}===========================================${RESET}
+${BOLD} texas-holdem 服务管理${RESET}
+${BOLD}===========================================${RESET}
+ 仓库:     ${GITHUB_REPO}
+ release:  ${RELEASE_TAG}
+ 服务状态: $(systemctl is-active texas-holdem 2>/dev/null || echo 'not-installed')
+ Caddy:    $(systemctl is-active caddy 2>/dev/null || echo 'not-installed')
+
+  1) 安装 / 重装
+  2) 升级二进制（拉新 release）
+  3) 启动
+  4) 停止
+  5) 重启
+  6) 查看状态
+  7) 实时日志（journalctl -f）
+  8) 重新应用内核 / ulimit 调优
+  9) 卸载（保留数据）
+ 10) 卸载并清理（--purge）
+  0) 退出
+EOF
+        echo
+        read -rp "选择: " ch
+        echo
+        case "${ch}" in
+            1) cmd_install; pause ;;
+            2) cmd_update; pause ;;
+            3) cmd_start; pause ;;
+            4) cmd_stop; pause ;;
+            5) cmd_restart; pause ;;
+            6) cmd_status; pause ;;
+            7) journalctl -u texas-holdem -f ;;
+            8) cmd_tune; pause ;;
+            9) cmd_uninstall; pause ;;
+            10) cmd_uninstall --purge; pause ;;
+            0) exit 0 ;;
+            *) warn "未知选项"; sleep 1 ;;
+        esac
+    done
+}
+
+pause() {
+    echo
+    read -rp "按回车返回菜单..." _
+}
+
+# ============================================================
+# 入口
+# ============================================================
+
+usage() {
+    grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -25
+}
+
+main() {
+    if [[ $# -eq 0 ]]; then
+        show_menu
+        return
+    fi
+
+    local cmd="$1"; shift || true
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --domain) DOMAIN="$2"; shift 2 ;;
+            --release-tag) RELEASE_TAG="$2"; shift 2 ;;
+            --tarball-url) TARBALL_URL="$2"; shift 2 ;;
+            --repo) GITHUB_REPO="$2"; shift 2 ;;
+            --purge) PURGE_FLAG="--purge"; shift ;;
+            -n) LOG_LINES="$2"; shift 2 ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "未知参数: $1" ;;
+        esac
+    done
+
+    case "${cmd}" in
+        install)   cmd_install ;;
+        update)    cmd_update ;;
+        start)     cmd_start ;;
+        stop)      cmd_stop ;;
+        restart)   cmd_restart ;;
+        status)    cmd_status ;;
+        logs)      cmd_logs "${LOG_LINES:-200}" ;;
+        tune)      cmd_tune ;;
+        uninstall) cmd_uninstall "${PURGE_FLAG:-}" ;;
+        menu)      show_menu ;;
+        -h|--help) usage ;;
+        *)         die "未知子命令: ${cmd}" ;;
+    esac
+}
+
+main "$@"
