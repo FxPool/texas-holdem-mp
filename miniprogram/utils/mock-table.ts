@@ -15,6 +15,10 @@ export function buildMockTable(): TableState {
     activeSeat: 2,
     actionDeadline: now + 30_000,
     revealedCount: 4,
+    endsAt: 0,
+    endPending: false,
+    ended: false,
+    hasPassword: false,
     communityCards: [
       { suit: 'heart', rank: 'A' },
       { suit: 'spade', rank: '10' },

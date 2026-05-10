@@ -11,19 +11,22 @@ import (
 )
 
 type RoomConfig struct {
-	SmallBlind int
-	BigBlind   int
-	MaxSeats   int // default 6
-	MinPlayers int // default 2; hand can start once this many seated
+	SmallBlind      int
+	BigBlind        int
+	MaxSeats        int    // default 6
+	MinPlayers      int    // default 2; hand can start once this many seated
+	Password        string // optional; empty = public room
+	DurationMinutes int    // 0 = no limit; otherwise auto-end after this many minutes
 }
 
 type PlayerMeta struct {
-	UserID   string
-	Nickname string
-	Avatar   string
-	BuyIn    int
-	Seat     int  // assigned at Join, persistent across hands while in room
-	IsBot    bool // true for AI-controlled players (uid prefix `bot:`)
+	UserID     string
+	Nickname   string
+	Avatar     string
+	BuyIn      int
+	TotalBuyIn int  // cumulative chips brought in (initial + rebuys), for settlement
+	Seat       int  // assigned at Join, persistent across hands while in room
+	IsBot      bool // true for AI-controlled players (uid prefix `bot:`)
 }
 
 // Room owns one Engine plus connections. All mutations through r.mu.
@@ -44,6 +47,16 @@ type Room struct {
 	// for `disconnectGrace` so the user can reconnect without losing their
 	// seat or chips. The map is keyed by userID.
 	disconnectTimers map[string]*time.Timer
+
+	// StartedAt is the room-creation timestamp; the duration countdown is
+	// always relative to this. EndsAt is StartedAt + DurationMinutes (zero
+	// when DurationMinutes == 0).
+	StartedAt time.Time
+	EndsAt    time.Time
+	// EndPending is true once the duration timer has fired but a hand was
+	// still in progress; settlement waits for HandComplete then flips Ended.
+	EndPending bool
+	Ended      bool
 }
 
 func NewRoom(id string, cfg RoomConfig) *Room {
@@ -53,7 +66,8 @@ func NewRoom(id string, cfg RoomConfig) *Room {
 	if cfg.MinPlayers == 0 {
 		cfg.MinPlayers = 2
 	}
-	return &Room{
+	now := time.Now()
+	r := &Room{
 		ID:               id,
 		Config:           cfg,
 		players:          map[string]*PlayerMeta{},
@@ -62,7 +76,110 @@ func NewRoom(id string, cfg RoomConfig) *Room {
 		dealerSeat:       -1,
 		sbSeat:           -1,
 		bbSeat:           -1,
+		StartedAt:        now,
 	}
+	if cfg.DurationMinutes > 0 {
+		r.EndsAt = now.Add(time.Duration(cfg.DurationMinutes) * time.Minute)
+	}
+	return r
+}
+
+// CheckPassword returns nil if pw matches the room's password (or it has none).
+func (r *Room) CheckPassword(pw string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.Config.Password == "" {
+		return nil
+	}
+	if pw != r.Config.Password {
+		return errors.New("password mismatch")
+	}
+	return nil
+}
+
+// HasPassword reports whether the room is password-protected.
+func (r *Room) HasPassword() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.Config.Password != ""
+}
+
+// IsEnded returns true once the game has been finalised.
+func (r *Room) IsEnded() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.Ended
+}
+
+// MarkEndPending flips the EndPending flag if the room is still active and
+// not already ended. Returns true if the flag transitioned.
+func (r *Room) MarkEndPending() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Ended || r.EndPending {
+		return false
+	}
+	r.EndPending = true
+	return true
+}
+
+// FinalizeEnd flips Ended and returns whether settlement should fire (i.e.
+// the call is the one that performs the transition). Idempotent.
+func (r *Room) FinalizeEnd() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.Ended {
+		return false
+	}
+	r.Ended = true
+	r.EndPending = false
+	return true
+}
+
+// SettlementEntry captures one player's end-of-game outcome.
+type SettlementEntry struct {
+	UserID     string
+	Nickname   string
+	Avatar     string
+	Seat       int
+	IsBot      bool
+	Chips      int // final chip stack (PlayerMeta.BuyIn after sync)
+	TotalBuyIn int // cumulative chips purchased (initial + rebuys)
+	Net        int // Chips - TotalBuyIn
+}
+
+// BuildSettlement returns a stable, rank-sorted snapshot of every seated
+// player's net result. Sorted by Net desc, then Chips desc, then Seat asc.
+func (r *Room) BuildSettlement() []SettlementEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]SettlementEntry, 0, len(r.players))
+	for _, m := range r.players {
+		total := m.TotalBuyIn
+		if total == 0 {
+			total = m.BuyIn
+		}
+		out = append(out, SettlementEntry{
+			UserID:     m.UserID,
+			Nickname:   m.Nickname,
+			Avatar:     m.Avatar,
+			Seat:       m.Seat,
+			IsBot:      m.IsBot,
+			Chips:      m.BuyIn,
+			TotalBuyIn: total,
+			Net:        m.BuyIn - total,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Net != out[j].Net {
+			return out[i].Net > out[j].Net
+		}
+		if out[i].Chips != out[j].Chips {
+			return out[i].Chips > out[j].Chips
+		}
+		return out[i].Seat < out[j].Seat
+	})
+	return out
 }
 
 // Join adds (or rejoins) a player, returning the assigned seat.
@@ -86,6 +203,10 @@ func (r *Room) Join(meta PlayerMeta, conn *Conn) (int, error) {
 		return existing.Seat, nil
 	}
 
+	if r.Ended {
+		return -1, errors.New("game has ended")
+	}
+
 	if len(r.players) >= r.Config.MaxSeats {
 		return -1, errors.New("room is full")
 	}
@@ -95,6 +216,9 @@ func (r *Room) Join(meta PlayerMeta, conn *Conn) (int, error) {
 		return -1, errors.New("no free seat")
 	}
 	meta.Seat = seat
+	if meta.TotalBuyIn == 0 {
+		meta.TotalBuyIn = meta.BuyIn
+	}
 	r.players[meta.UserID] = &meta
 	r.conns[meta.UserID] = conn
 	return seat, nil
@@ -115,6 +239,9 @@ func (r *Room) AddBot(meta PlayerMeta) (int, error) {
 	meta.IsBot = true
 	if meta.BuyIn <= 0 {
 		meta.BuyIn = 1000
+	}
+	if meta.TotalBuyIn == 0 {
+		meta.TotalBuyIn = meta.BuyIn
 	}
 	r.players[meta.UserID] = &meta
 	return seat, nil
@@ -251,6 +378,10 @@ func (r *Room) StartHand() ([]game.Event, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if r.Ended || r.EndPending {
+		return nil, errors.New("game has ended")
+	}
+
 	eligible := 0
 	for _, m := range r.players {
 		if m.BuyIn > 0 {
@@ -351,6 +482,9 @@ const MaxRebuyAmount = 100_000
 func (r *Room) Rebuy(userID string, amount int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.Ended || r.EndPending {
+		return errors.New("game is ending")
+	}
 	if amount <= 0 {
 		return errors.New("rebuy amount must be positive")
 	}
@@ -369,6 +503,7 @@ func (r *Room) Rebuy(userID string, amount int) error {
 		}
 	}
 	m.BuyIn += amount
+	m.TotalBuyIn += amount
 	return nil
 }
 
@@ -401,6 +536,9 @@ func (r *Room) SyncBuyInsFromEngine() {
 func (r *Room) ApplyAction(userID string, action game.Action) ([]game.Event, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.Ended {
+		return nil, errors.New("game has ended")
+	}
 	if r.engine == nil {
 		return nil, errors.New("no hand in progress")
 	}

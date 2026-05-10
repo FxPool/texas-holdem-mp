@@ -30,6 +30,7 @@ type JoinPayload struct {
 	Nickname string `json:"nickname"`
 	Avatar   string `json:"avatar"`
 	BuyIn    int    `json:"buyIn"`
+	Password string `json:"password,omitempty"`
 }
 
 type LeavePayload struct {
@@ -65,6 +66,7 @@ const (
 	SMsgPlayerLeft   ServerMsgType = "player-left"
 	SMsgChat         ServerMsgType = "chat"
 	SMsgPong         ServerMsgType = "pong"
+	SMsgGameEnded    ServerMsgType = "game-ended"
 )
 
 type ServerMessage struct {
@@ -103,19 +105,43 @@ type PlayerView struct {
 
 // RoomStateView is the full snapshot a client receives. Built per-viewer.
 type RoomStateView struct {
-	RoomID        string       `json:"roomId"`
-	Stage         string       `json:"stage"`
-	Pot           int          `json:"pot"`
-	CurrentBet    int          `json:"currentBet"`
-	MinRaise      int          `json:"minRaise"`
-	ActiveSeat    int          `json:"activeSeat"`
-	DealerSeat    int          `json:"dealerSeat"`
-	SmallBlind    int          `json:"smallBlind"`
-	BigBlind      int          `json:"bigBlind"`
-	Community     []game.Card  `json:"community"`
-	RevealedCount int          `json:"revealedCount"`
-	Players       []PlayerView `json:"players"`
-	ViewerSeat    int          `json:"viewerSeat"` // -1 if viewer is a spectator
+	RoomID          string       `json:"roomId"`
+	Stage           string       `json:"stage"`
+	Pot             int          `json:"pot"`
+	CurrentBet      int          `json:"currentBet"`
+	MinRaise        int          `json:"minRaise"`
+	ActiveSeat      int          `json:"activeSeat"`
+	DealerSeat      int          `json:"dealerSeat"`
+	SmallBlind      int          `json:"smallBlind"`
+	BigBlind        int          `json:"bigBlind"`
+	Community       []game.Card  `json:"community"`
+	RevealedCount   int          `json:"revealedCount"`
+	Players         []PlayerView `json:"players"`
+	ViewerSeat      int          `json:"viewerSeat"` // -1 if viewer is a spectator
+	HasPassword     bool         `json:"hasPassword"`
+	DurationMinutes int          `json:"durationMinutes"`
+	EndsAt          int64        `json:"endsAt"` // unix ms; 0 if no limit
+	EndPending      bool         `json:"endPending"`
+	Ended           bool         `json:"ended"`
+}
+
+// GameEndedPayload is broadcast once when a duration-limited game finalises.
+type GameEndedPayload struct {
+	RoomID   string                  `json:"roomId"`
+	EndedAt  int64                   `json:"endedAt"` // unix ms
+	Players  []PlayerSettlementView  `json:"players"` // sorted by net desc
+}
+
+type PlayerSettlementView struct {
+	UserID     string `json:"userId"`
+	Nickname   string `json:"nickname"`
+	Avatar     string `json:"avatar"`
+	Seat       int    `json:"seat"`
+	IsBot      bool   `json:"isBot"`
+	Chips      int    `json:"chips"`
+	TotalBuyIn int    `json:"totalBuyIn"`
+	Net        int    `json:"net"`
+	Rank       int    `json:"rank"`
 }
 
 // GameEventPayload wraps an engine.Event for transport.

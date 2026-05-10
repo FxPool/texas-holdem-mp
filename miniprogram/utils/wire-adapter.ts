@@ -41,6 +41,10 @@ export function wireToTable(
     actionDeadline,
     smallBlind: wire.smallBlind,
     bigBlind: wire.bigBlind,
+    endsAt: wire.endsAt ?? 0,
+    endPending: wire.endPending ?? false,
+    ended: wire.ended ?? false,
+    hasPassword: wire.hasPassword ?? false,
   };
 }
 

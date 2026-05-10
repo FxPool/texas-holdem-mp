@@ -14,13 +14,22 @@ func BuildRoomStateView(r *Room, viewerUserID string) RoomStateView {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	endsAt := int64(0)
+	if !r.EndsAt.IsZero() {
+		endsAt = r.EndsAt.UnixMilli()
+	}
 	view := RoomStateView{
-		RoomID:     r.ID,
-		SmallBlind: r.Config.SmallBlind,
-		BigBlind:   r.Config.BigBlind,
-		ActiveSeat: -1,
-		DealerSeat: -1,
-		ViewerSeat: -1,
+		RoomID:          r.ID,
+		SmallBlind:      r.Config.SmallBlind,
+		BigBlind:        r.Config.BigBlind,
+		ActiveSeat:      -1,
+		DealerSeat:      -1,
+		ViewerSeat:      -1,
+		HasPassword:     r.Config.Password != "",
+		DurationMinutes: r.Config.DurationMinutes,
+		EndsAt:          endsAt,
+		EndPending:      r.EndPending,
+		Ended:           r.Ended,
 	}
 
 	if r.engine == nil {

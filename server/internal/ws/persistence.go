@@ -26,18 +26,22 @@ type Snapshot struct {
 }
 
 type RoomSnapshot struct {
-	ID         string                 `json:"id"`
-	Config     RoomConfig             `json:"config"`
-	DealerSeat int                    `json:"dealerSeat"`
-	Players    []PlayerMetaSnapshot   `json:"players"`
+	ID         string               `json:"id"`
+	Config     RoomConfig           `json:"config"`
+	DealerSeat int                  `json:"dealerSeat"`
+	Players    []PlayerMetaSnapshot `json:"players"`
+	StartedAt  int64                `json:"startedAt"` // unix ms
+	EndsAt     int64                `json:"endsAt"`    // unix ms; 0 if no limit
+	Ended      bool                 `json:"ended"`
 }
 
 type PlayerMetaSnapshot struct {
-	UserID   string `json:"userId"`
-	Nickname string `json:"nickname"`
-	Avatar   string `json:"avatar"`
-	Seat     int    `json:"seat"`
-	BuyIn    int    `json:"buyIn"`
+	UserID     string `json:"userId"`
+	Nickname   string `json:"nickname"`
+	Avatar     string `json:"avatar"`
+	Seat       int    `json:"seat"`
+	BuyIn      int    `json:"buyIn"`
+	TotalBuyIn int    `json:"totalBuyIn"`
 }
 
 // UserStatsSnap is the persistent counterpart of in-memory user stats.
@@ -230,20 +234,36 @@ func snapshotRoom(r *Room) RoomSnapshot {
 	defer r.mu.RUnlock()
 	metas := make([]PlayerMetaSnapshot, 0, len(r.players))
 	for _, m := range r.players {
+		total := m.TotalBuyIn
+		if total == 0 {
+			total = m.BuyIn
+		}
 		metas = append(metas, PlayerMetaSnapshot{
-			UserID:   m.UserID,
-			Nickname: m.Nickname,
-			Avatar:   m.Avatar,
-			Seat:     m.Seat,
-			BuyIn:    m.BuyIn,
+			UserID:     m.UserID,
+			Nickname:   m.Nickname,
+			Avatar:     m.Avatar,
+			Seat:       m.Seat,
+			BuyIn:      m.BuyIn,
+			TotalBuyIn: total,
 		})
 	}
 	sort.Slice(metas, func(i, j int) bool { return metas[i].Seat < metas[j].Seat })
+	startedAt := int64(0)
+	if !r.StartedAt.IsZero() {
+		startedAt = r.StartedAt.UnixMilli()
+	}
+	endsAt := int64(0)
+	if !r.EndsAt.IsZero() {
+		endsAt = r.EndsAt.UnixMilli()
+	}
 	return RoomSnapshot{
 		ID:         r.ID,
 		Config:     r.Config,
 		DealerSeat: r.dealerSeat,
 		Players:    metas,
+		StartedAt:  startedAt,
+		EndsAt:     endsAt,
+		Ended:      r.Ended,
 	}
 }
 
@@ -252,14 +272,28 @@ func snapshotRoom(r *Room) RoomSnapshot {
 func loadRoomFromSnapshot(s RoomSnapshot) *Room {
 	r := NewRoom(s.ID, s.Config)
 	r.dealerSeat = s.DealerSeat
+	if s.StartedAt > 0 {
+		r.StartedAt = time.UnixMilli(s.StartedAt)
+	}
+	if s.EndsAt > 0 {
+		r.EndsAt = time.UnixMilli(s.EndsAt)
+	} else {
+		r.EndsAt = time.Time{}
+	}
+	r.Ended = s.Ended
 	for _, p := range s.Players {
+		total := p.TotalBuyIn
+		if total == 0 {
+			total = p.BuyIn
+		}
 		// We deep-copy to avoid sharing the snapshot pointer.
 		meta := PlayerMeta{
-			UserID:   p.UserID,
-			Nickname: p.Nickname,
-			Avatar:   p.Avatar,
-			Seat:     p.Seat,
-			BuyIn:    p.BuyIn,
+			UserID:     p.UserID,
+			Nickname:   p.Nickname,
+			Avatar:     p.Avatar,
+			Seat:       p.Seat,
+			BuyIn:      p.BuyIn,
+			TotalBuyIn: total,
 		}
 		r.players[p.UserID] = &meta
 	}
@@ -294,13 +328,22 @@ func (h *Hub) AttachStore(store *SnapshotStore, saveInterval time.Duration) erro
 		return err
 	}
 	h.mu.Lock()
+	loaded := make([]*Room, 0, len(rooms))
 	for _, rs := range rooms {
 		if _, exists := h.rooms[rs.ID]; exists {
 			continue
 		}
-		h.rooms[rs.ID] = loadRoomFromSnapshot(rs)
+		room := loadRoomFromSnapshot(rs)
+		h.rooms[rs.ID] = room
+		loaded = append(loaded, room)
 	}
 	h.mu.Unlock()
+	for _, room := range loaded {
+		if room.Ended || room.EndsAt.IsZero() {
+			continue
+		}
+		h.scheduleGameEnd(room)
+	}
 	if saveInterval > 0 {
 		go h.persistenceLoop(saveInterval)
 	}

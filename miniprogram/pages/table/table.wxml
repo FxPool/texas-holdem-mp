@@ -8,6 +8,10 @@
       <text class="room-label">房间</text>
       <text class="room-id">#{{table.roomId}}</text>
       <text class="blinds">{{table.smallBlind}}/{{table.bigBlind}}</text>
+      <view wx:if="{{countdownText}}" class="countdown {{table.endPending ? 'is-pending' : ''}} {{table.ended ? 'is-ended' : ''}}">
+        <text class="countdown-icon">⏱</text>
+        <text class="countdown-text">{{countdownText}}</text>
+      </view>
     </view>
     <view class="topbar-title" wx:else>
       <text class="room-label">{{connectionState === 'connecting' ? '连接中…' : '德州扑克'}}</text>
@@ -18,6 +22,7 @@
   </view>
 
   <view wx:if="{{banner}}" class="banner">{{banner}}</view>
+  <view wx:if="{{endingHint && !banner}}" class="banner banner-end">{{endingHint}}</view>
 
   <block wx:if="{{table}}">
     <view class="stage-tag">{{table.stage}}</view>
@@ -160,4 +165,29 @@
     uncontested-amount="{{uncontestedAmount}}"
     bind:dismiss="onShowdownDismiss"
   />
+
+  <!-- 终局结算面板 -->
+  <view wx:if="{{settlementVisible}}" class="settlement-mask">
+    <view class="settlement-panel">
+      <view class="settlement-title">游戏结束 · 最终结算</view>
+      <view class="settlement-sub">按净盈亏排名（最终筹码 − 累计带入）</view>
+      <view class="settlement-list">
+        <block wx:for="{{settlementPlayers}}" wx:key="userId" wx:for-item="row">
+          <view class="settlement-row">
+            <view class="settlement-rank">{{row.rank}}</view>
+            <view class="settlement-avatar"><text>{{row.avatar}}</text></view>
+            <view class="settlement-meta">
+              <text class="settlement-name">{{row.nickname}}</text>
+              <text class="settlement-detail">筹码 {{row.chips}} · 带入 {{row.totalBuyIn}}</text>
+            </view>
+            <view class="settlement-net {{row.net > 0 ? 'win' : (row.net < 0 ? 'lose' : '')}}">
+              <text wx:if="{{row.net > 0}}">+{{row.net}}</text>
+              <text wx:else>{{row.net}}</text>
+            </view>
+          </view>
+        </block>
+      </view>
+      <view class="settlement-back" bindtap="onSettlementBackToLobby">返回大厅</view>
+    </view>
+  </view>
 </view>

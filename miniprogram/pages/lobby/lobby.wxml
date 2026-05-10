@@ -22,7 +22,7 @@
       data-index="{{idx}}"
       bindtap="onJoinRoom"
     >
-      <view class="room-icon">🃏</view>
+      <view class="room-icon">{{ item.hasPassword ? '🔒' : '🃏' }}</view>
       <view class="room-info">
         <text class="room-name">{{item.name}}</text>
         <view class="room-meta">
@@ -31,6 +31,10 @@
           <text>带入 {{item.buyIn}}</text>
           <text class="dot">·</text>
           <text>{{item.seats}}</text>
+          <block wx:if="{{item.durationMinutes > 0}}">
+            <text class="dot">·</text>
+            <text>{{item.durationMinutes}} 分钟</text>
+          </block>
         </view>
       </view>
       <view wx:if="{{item.isLive}}" class="room-id">#{{item.id}}</view>

@@ -8,10 +8,12 @@ import type {
   Card,
   ChatMessagePayload,
   ErrorPayload,
+  GameEndedPayload,
   GameEventPayload,
   JoinedPayload,
   Player,
   PlayerAction,
+  PlayerSettlement,
   ServerMessage,
   Suit,
   TableState,
@@ -86,6 +88,14 @@ interface PageData {
   uncontestedWinnerName: string;
   uncontestedAmount: number;
 
+  // Game-duration countdown (only shown when endsAt > 0)
+  countdownText: string;
+  endingHint: string;
+
+  // End-of-game settlement panel
+  settlementVisible: boolean;
+  settlementPlayers: PlayerSettlement[];
+
   // Animations
   isDealing: boolean;            // hole card deal animation playing
   newCommunityIndices: number[]; // indices of community cards just revealed (for flip-in)
@@ -105,6 +115,8 @@ interface PageMethods {
   onToggleChatPicker(): void;
   onPickEmoji(e: WechatMiniprogram.TouchEvent): void;
   onChatBackdropTap(): void;
+  onSettlementBackToLobby(): void;
+  openSettlement(players: PlayerSettlement[]): void;
   shareRoom(): void;
   onShareAppMessage(): WechatMiniprogram.Page.ICustomShareContent;
 }
@@ -121,6 +133,18 @@ function toCardView(c: Card): MyCardView {
 let unsubAll: Array<() => void> = [];
 let chipFlyIdSeq = 0;
 let chatBubbleIdSeq = 0;
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
+let pageJoinPassword = '';
+
+function formatRemaining(ms: number): string {
+  if (ms <= 0) return '00:00';
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  const mm = m < 10 ? `0${m}` : String(m);
+  const ss = s < 10 ? `0${s}` : String(s);
+  return `${mm}:${ss}`;
+}
 
 Page<PageData, PageMethods>({
   data: {
@@ -142,6 +166,11 @@ Page<PageData, PageMethods>({
     uncontestedWinnerName: '',
     uncontestedAmount: 0,
 
+    countdownText: '',
+    endingHint: '',
+    settlementVisible: false,
+    settlementPlayers: [],
+
     isDealing: false,
     newCommunityIndices: [],
     chipFlies: [],
@@ -162,6 +191,7 @@ Page<PageData, PageMethods>({
     }
     const roomId = (options?.roomId as string) || '1234';
     const buyIn = Number(options?.buyIn ?? 1000);
+    pageJoinPassword = String(options?.password ?? '');
 
     const offState = gameSocket.on<WireRoomState>('room-state', (msg) => {
       if (!msg.data) return;
@@ -183,10 +213,31 @@ Page<PageData, PageMethods>({
       if (!msg.data) return;
       this.spawnChatBubble(msg.data);
     });
+    const offEnded = gameSocket.on<GameEndedPayload>('game-ended', (msg) => {
+      if (!msg.data) return;
+      this.openSettlement(msg.data.players);
+    });
     const offAny = gameSocket.onAny((_m: ServerMessage) => {
       // diagnostic hook
     });
-    unsubAll = [offState, offJoined, offError, offEvent, offChat, offAny];
+    unsubAll = [offState, offJoined, offError, offEvent, offChat, offEnded, offAny];
+
+    // 1Hz countdown ticker (cheap; only runs while we're on this page).
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+      const tbl = this.data.table;
+      if (!tbl || tbl.endsAt <= 0) {
+        if (this.data.countdownText !== '') this.setData({ countdownText: '' });
+        return;
+      }
+      if (tbl.ended) {
+        if (this.data.countdownText !== '已结束') this.setData({ countdownText: '已结束' });
+        return;
+      }
+      const remaining = tbl.endsAt - Date.now();
+      const text = formatRemaining(remaining);
+      if (text !== this.data.countdownText) this.setData({ countdownText: text });
+    }, 1000);
 
     this.setData({ banner: '获取登录凭据…' });
     ensureLoggedIn()
@@ -208,6 +259,7 @@ Page<PageData, PageMethods>({
             nickname: u.nickname,
             avatar: u.avatar,
             buyIn,
+            password: pageJoinPassword || undefined,
           });
         };
         return gameSocket
@@ -255,6 +307,11 @@ Page<PageData, PageMethods>({
   onUnload() {
     unsubAll.forEach((fn) => fn());
     unsubAll = [];
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+    pageJoinPassword = '';
     if (gameSocket.isConnected()) gameSocket.send('leave', { roomId: this.data.table?.roomId });
     gameSocket.close();
   },
@@ -308,17 +365,43 @@ Page<PageData, PageMethods>({
       }
     }
 
+    let endingHint = '';
+    if (table.ended) {
+      endingHint = '本局已结束';
+    } else if (table.endPending) {
+      endingHint = '时间到，本手打完后结算';
+    }
+    const isMyTurnFinal = !table.ended && isMyTurn;
+
     this.setData({
       table,
       myPlayer: me,
       opponents,
       myCardsView,
-      isMyTurn,
+      isMyTurn: isMyTurnFinal,
       callAmount,
       canCheck: callAmount === 0,
       banner: '',
+      endingHint,
       newCommunityIndices: newIdx.length ? newIdx : this.data.newCommunityIndices,
     });
+  },
+
+  openSettlement(players: PlayerSettlement[]) {
+    this.setData({
+      settlementVisible: true,
+      settlementPlayers: players,
+      // close the per-hand showdown panel so it doesn't double-stack
+      showdownVisible: false,
+      showdownContestants: [],
+      showdownCommunity: [],
+      uncontestedWinnerName: '',
+      uncontestedAmount: 0,
+    });
+  },
+
+  onSettlementBackToLobby() {
+    wx.navigateBack({ delta: 1, fail: () => wx.switchTab({ url: '/pages/lobby/lobby' }) });
   },
 
   handleGameEvent(payload: GameEventPayload | undefined) {

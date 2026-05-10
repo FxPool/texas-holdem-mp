@@ -35,6 +35,7 @@ type Hub struct {
 	// after autoStartDelay once the previous hand reaches HandComplete.
 	timerMu        sync.Mutex
 	handTimers     map[string]*time.Timer
+	endTimers      map[string]*time.Timer
 	autoStartDelay time.Duration
 
 	// Per-user rate limiter. Caps mutating client messages at ~5/s burst
@@ -61,6 +62,7 @@ func NewHub(defaultCfg RoomConfig) *Hub {
 		rooms:           map[string]*Room{},
 		defaultCfg:      defaultCfg,
 		handTimers:      map[string]*time.Timer{},
+		endTimers:       map[string]*time.Timer{},
 		autoStartDelay:  DefaultAutoStartDelay,
 		limiter:         newRateLimiter(5, 2),
 		disconnectGrace: DefaultDisconnectGrace,
@@ -122,14 +124,105 @@ func (h *Hub) CreateRoom(id string, cfg RoomConfig) (*Room, error) {
 	if cfg.MaxSeats < 2 || cfg.MaxSeats > 9 {
 		return nil, errors.New("maxSeats must be 2..9")
 	}
+	if cfg.DurationMinutes < 0 || cfg.DurationMinutes > 24*60 {
+		return nil, errors.New("durationMinutes must be 0..1440")
+	}
+	if len(cfg.Password) > 32 {
+		return nil, errors.New("password too long")
+	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if _, exists := h.rooms[id]; exists {
+		h.mu.Unlock()
 		return nil, errors.New("room already exists")
 	}
 	r := NewRoom(id, cfg)
 	h.rooms[id] = r
+	h.mu.Unlock()
+	if cfg.DurationMinutes > 0 {
+		h.scheduleGameEnd(r)
+	}
 	return r, nil
+}
+
+// scheduleGameEnd arms the duration timer for room r. Idempotent — replaces
+// any prior end timer for the same room.
+func (h *Hub) scheduleGameEnd(room *Room) {
+	if room.EndsAt.IsZero() {
+		return
+	}
+	delay := time.Until(room.EndsAt)
+	if delay <= 0 {
+		// Already past the deadline: trigger immediately.
+		go h.triggerGameEnd(room)
+		return
+	}
+	roomID := room.ID
+	h.timerMu.Lock()
+	if old := h.endTimers[roomID]; old != nil {
+		old.Stop()
+	}
+	h.endTimers[roomID] = time.AfterFunc(delay, func() {
+		h.timerMu.Lock()
+		delete(h.endTimers, roomID)
+		h.timerMu.Unlock()
+		h.triggerGameEnd(room)
+	})
+	h.timerMu.Unlock()
+}
+
+// triggerGameEnd marks the room as end-pending. If no hand is in progress it
+// settles immediately; otherwise settlement waits for HandComplete.
+func (h *Hub) triggerGameEnd(room *Room) {
+	if !room.MarkEndPending() {
+		return
+	}
+	log.Printf("[hub] room %s duration timer fired, end-pending", room.ID)
+	// Cancel any auto-restart so we don't deal a fresh hand after the deadline.
+	h.cancelNextHand(room.ID)
+
+	// If a hand is currently in progress, defer settlement until it
+	// completes (advanceUntilBlocked picks it up). Otherwise settle now.
+	room.mu.RLock()
+	midHand := room.engine != nil && room.engine.Stage != game.StageHandComplete && room.engine.Stage != game.StageWaiting
+	room.mu.RUnlock()
+	// Notify clients that the timer is up so they can render a "结算中" hint.
+	h.broadcastRoomState(room)
+	if !midHand {
+		h.finalizeGameEnd(room)
+	}
+}
+
+// finalizeGameEnd computes settlement, broadcasts game-ended, and freezes
+// the room. Idempotent.
+func (h *Hub) finalizeGameEnd(room *Room) {
+	if !room.FinalizeEnd() {
+		return
+	}
+	log.Printf("[hub] room %s settling final scores", room.ID)
+	entries := room.BuildSettlement()
+	views := make([]PlayerSettlementView, 0, len(entries))
+	for i, e := range entries {
+		views = append(views, PlayerSettlementView{
+			UserID:     e.UserID,
+			Nickname:   e.Nickname,
+			Avatar:     e.Avatar,
+			Seat:       e.Seat,
+			IsBot:      e.IsBot,
+			Chips:      e.Chips,
+			TotalBuyIn: e.TotalBuyIn,
+			Net:        e.Net,
+			Rank:       i + 1,
+		})
+	}
+	payload := GameEndedPayload{
+		RoomID:  room.ID,
+		EndedAt: time.Now().UnixMilli(),
+		Players: views,
+	}
+	for _, conn := range room.Conns() {
+		conn.SendMessage(ServerMessage{Type: SMsgGameEnded, Data: payload})
+	}
+	h.broadcastRoomState(room)
 }
 
 // GetRoom returns a room or nil.
@@ -141,11 +234,15 @@ func (h *Hub) GetRoom(id string) *Room {
 
 // ListRooms returns a snapshot of room IDs and player counts.
 type RoomSummary struct {
-	ID         string `json:"id"`
-	Players    int    `json:"players"`
-	MaxSeats   int    `json:"maxSeats"`
-	SmallBlind int    `json:"smallBlind"`
-	BigBlind   int    `json:"bigBlind"`
+	ID              string `json:"id"`
+	Players         int    `json:"players"`
+	MaxSeats        int    `json:"maxSeats"`
+	SmallBlind      int    `json:"smallBlind"`
+	BigBlind        int    `json:"bigBlind"`
+	HasPassword     bool   `json:"hasPassword"`
+	DurationMinutes int    `json:"durationMinutes"`
+	EndsAt          int64  `json:"endsAt"` // unix ms; 0 = no limit
+	Ended           bool   `json:"ended"`
 }
 
 func (h *Hub) ListRooms() []RoomSummary {
@@ -153,12 +250,20 @@ func (h *Hub) ListRooms() []RoomSummary {
 	defer h.mu.RUnlock()
 	out := make([]RoomSummary, 0, len(h.rooms))
 	for _, r := range h.rooms {
+		endsAt := int64(0)
+		if !r.EndsAt.IsZero() {
+			endsAt = r.EndsAt.UnixMilli()
+		}
 		out = append(out, RoomSummary{
-			ID:         r.ID,
-			Players:    len(r.PlayerMetas()),
-			MaxSeats:   r.Config.MaxSeats,
-			SmallBlind: r.Config.SmallBlind,
-			BigBlind:   r.Config.BigBlind,
+			ID:              r.ID,
+			Players:         len(r.PlayerMetas()),
+			MaxSeats:        r.Config.MaxSeats,
+			SmallBlind:      r.Config.SmallBlind,
+			BigBlind:        r.Config.BigBlind,
+			HasPassword:     r.HasPassword(),
+			DurationMinutes: r.Config.DurationMinutes,
+			EndsAt:          endsAt,
+			Ended:           r.IsEnded(),
 		})
 	}
 	return out
@@ -193,7 +298,28 @@ func (h *Hub) HandleClientMessage(c *Conn, msg ClientMessage) {
 			c.SendError("bad-payload", "roomId and userId required")
 			return
 		}
-		room := h.GetOrCreateRoom(p.RoomID)
+		// Look up first so we can enforce a password on existing rooms.
+		// Auto-create only when the room has no password requirement.
+		room := h.GetRoom(p.RoomID)
+		if room == nil {
+			room = h.GetOrCreateRoom(p.RoomID)
+		} else {
+			// Reconnects (player already seated) bypass password — they
+			// already passed the check on their first join.
+			isReconnect := false
+			for _, m := range room.PlayerMetas() {
+				if m.UserID == p.UserID {
+					isReconnect = true
+					break
+				}
+			}
+			if !isReconnect {
+				if err := room.CheckPassword(p.Password); err != nil {
+					c.SendError("password-required", "房间密码错误")
+					return
+				}
+			}
+		}
 		seat, err := room.Join(PlayerMeta{
 			UserID:   p.UserID,
 			Nickname: p.Nickname,
@@ -406,11 +532,16 @@ func (h *Hub) HandleDisconnect(c *Conn) {
 // --- helpers ---
 
 func (h *Hub) maybeStartHand(room *Room) {
-	eng := func() *game.Engine {
-		room.mu.RLock()
-		defer room.mu.RUnlock()
-		return room.engine
-	}()
+	if room.IsEnded() {
+		return
+	}
+	room.mu.RLock()
+	eng := room.engine
+	endPending := room.EndPending
+	room.mu.RUnlock()
+	if endPending {
+		return
+	}
 	if eng != nil && eng.Stage != game.StageHandComplete {
 		return
 	}
@@ -442,6 +573,13 @@ func (h *Hub) advanceUntilBlocked(room *Room) {
 			h.recordHandStats(room, eng)
 			room.SyncBuyInsFromEngine()
 			h.broadcastRoomState(room)
+			room.mu.RLock()
+			endPending := room.EndPending && !room.Ended
+			room.mu.RUnlock()
+			if endPending {
+				h.finalizeGameEnd(room)
+				return
+			}
 			h.scheduleNextHand(room)
 			return
 		}

@@ -14,20 +14,25 @@ import (
 // CreateRoomRequest is the body of POST /rooms. All fields optional;
 // blanks fall through to the hub's default config.
 type CreateRoomRequest struct {
-	ID         string `json:"id"`
-	SmallBlind int    `json:"smallBlind"`
-	BigBlind   int    `json:"bigBlind"`
-	MaxSeats   int    `json:"maxSeats"`
-	Bots       int    `json:"bots"`     // optional: seed N AI players
-	BotBuyIn   int    `json:"botBuyIn"` // optional: chip stack per bot, default 1000
+	ID              string `json:"id"`
+	SmallBlind      int    `json:"smallBlind"`
+	BigBlind        int    `json:"bigBlind"`
+	MaxSeats        int    `json:"maxSeats"`
+	Bots            int    `json:"bots"`     // optional: seed N AI players
+	BotBuyIn        int    `json:"botBuyIn"` // optional: chip stack per bot, default 1000
+	Password        string `json:"password"` // optional; empty = public room
+	DurationMinutes int    `json:"durationMinutes"`
 }
 
 type CreateRoomResponse struct {
-	ID         string `json:"id"`
-	SmallBlind int    `json:"smallBlind"`
-	BigBlind   int    `json:"bigBlind"`
-	MaxSeats   int    `json:"maxSeats"`
-	Bots       int    `json:"bots"`
+	ID              string `json:"id"`
+	SmallBlind      int    `json:"smallBlind"`
+	BigBlind        int    `json:"bigBlind"`
+	MaxSeats        int    `json:"maxSeats"`
+	Bots            int    `json:"bots"`
+	HasPassword     bool   `json:"hasPassword"`
+	DurationMinutes int    `json:"durationMinutes"`
+	EndsAt          int64  `json:"endsAt"` // unix ms; 0 if no limit
 }
 
 // RoomsHandler returns a single handler that serves both GET (list) and
@@ -62,9 +67,11 @@ func handleCreate(hub *ws.Hub, w http.ResponseWriter, r *http.Request) {
 		id = gen
 	}
 	room, err := hub.CreateRoom(id, ws.RoomConfig{
-		SmallBlind: req.SmallBlind,
-		BigBlind:   req.BigBlind,
-		MaxSeats:   req.MaxSeats,
+		SmallBlind:      req.SmallBlind,
+		BigBlind:        req.BigBlind,
+		MaxSeats:        req.MaxSeats,
+		Password:        req.Password,
+		DurationMinutes: req.DurationMinutes,
 	})
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "create-failed", err.Error())
@@ -90,12 +97,19 @@ func handleCreate(hub *ws.Hub, w http.ResponseWriter, r *http.Request) {
 			addedBots++
 		}
 	}
+	endsAt := int64(0)
+	if !room.EndsAt.IsZero() {
+		endsAt = room.EndsAt.UnixMilli()
+	}
 	writeJSON(w, http.StatusOK, CreateRoomResponse{
-		ID:         room.ID,
-		SmallBlind: room.Config.SmallBlind,
-		BigBlind:   room.Config.BigBlind,
-		MaxSeats:   room.Config.MaxSeats,
-		Bots:       addedBots,
+		ID:              room.ID,
+		SmallBlind:      room.Config.SmallBlind,
+		BigBlind:        room.Config.BigBlind,
+		MaxSeats:        room.Config.MaxSeats,
+		Bots:            addedBots,
+		HasPassword:     room.HasPassword(),
+		DurationMinutes: room.Config.DurationMinutes,
+		EndsAt:          endsAt,
 	})
 }
 

@@ -49,6 +49,10 @@ export interface TableState {
   actionDeadline: number;   // 客户端本地估算的行动截止时间戳 ms
   smallBlind: number;
   bigBlind: number;
+  endsAt: number;           // unix ms; 0 if no game-duration limit
+  endPending: boolean;      // duration timer fired, waiting for current hand to finish
+  ended: boolean;
+  hasPassword: boolean;
 }
 
 export type ActionType = 'fold' | 'check' | 'call' | 'raise' | 'all-in';
@@ -93,6 +97,29 @@ export interface WireRoomState {
   revealedCount: number;
   players: WirePlayer[];
   viewerSeat: number;
+  hasPassword: boolean;
+  durationMinutes: number;
+  endsAt: number; // unix ms; 0 if no limit
+  endPending: boolean;
+  ended: boolean;
+}
+
+export interface PlayerSettlement {
+  userId: string;
+  nickname: string;
+  avatar: string;
+  seat: number;
+  isBot: boolean;
+  chips: number;
+  totalBuyIn: number;
+  net: number;
+  rank: number;
+}
+
+export interface GameEndedPayload {
+  roomId: string;
+  endedAt: number;
+  players: PlayerSettlement[];
 }
 
 export type ServerMsgType =
@@ -103,7 +130,8 @@ export type ServerMsgType =
   | 'player-joined'
   | 'player-left'
   | 'chat'
-  | 'pong';
+  | 'pong'
+  | 'game-ended';
 
 export interface ServerMessage<T = unknown> {
   type: ServerMsgType;
@@ -139,6 +167,7 @@ export interface JoinPayload {
   nickname: string;
   avatar: string;
   buyIn: number;
+  password?: string;
 }
 
 export interface ActionPayload {
