@@ -1,5 +1,6 @@
 import { store } from '../../utils/store';
 import { request } from '../../utils/request';
+import { isUrlAvatar } from '../../utils/wx-profile';
 
 interface ServerRoomSummary {
   id: string;
@@ -34,20 +35,53 @@ const PRESETS: Array<{ name: string; smallBlind: number; bigBlind: number; buyIn
   { name: '高手互砍', smallBlind: 500, bigBlind: 1000, buyIn: 5000, maxSeats: 6 },
 ];
 
+interface PresetView {
+  name: string;
+  smallBlind: number;
+  bigBlind: number;
+  buyIn: number;
+  maxSeats: number;
+}
+
 interface PageData {
   rooms: RoomItem[];
   myNickname: string;
   myAvatar: string;
+  myAvatarIsUrl: boolean;
   refreshing: boolean;
+
+  // 创建房间弹窗
+  createOpen: boolean;
+  presets: PresetView[];
+  createPresetIdx: number;
+  createWithBots: boolean;
+  createDurationStr: string;
+  createPasswordStr: string;
+  createSubmitting: boolean;
+
+  // 加入有密码的房间
+  joinPwOpen: boolean;
+  joinPwRoomId: string;
+  joinPwBuyIn: number;
+  joinPwInput: string;
 }
 
 interface PageMethods {
   onJoinRoom(e: WechatMiniprogram.TouchEvent): void;
   onCreateRoom(): void;
+  onCreateCancel(): void;
+  onCreateConfirm(): Promise<void>;
+  onPickPreset(e: WechatMiniprogram.TouchEvent): void;
+  onToggleBots(): void;
+  onCreateDurationInput(e: WechatMiniprogram.Input): void;
+  onCreatePasswordInput(e: WechatMiniprogram.Input): void;
+  onJoinPwCancel(): void;
+  onJoinPwInput(e: WechatMiniprogram.Input): void;
+  onJoinPwConfirm(): void;
   onChangeName(): void;
   refresh(): Promise<void>;
   onPullDownRefresh(): void;
-  createAIRoom(): Promise<void>;
+  noop(): void;
 }
 
 function buildRoomItems(server: ServerRoomSummary[]): RoomItem[] {
@@ -119,60 +153,13 @@ function buildRoomItems(server: ServerRoomSummary[]): RoomItem[] {
   return items;
 }
 
-// Prompts user for a password via wx.showModal. Resolves with the entered
-// string (may be empty) or null if user cancelled.
-function promptPassword(title: string, placeholder: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    wx.showModal({
-      title,
-      editable: true,
-      placeholderText: placeholder,
-      confirmText: '确认',
-      cancelText: '取消',
-      success: (res) => {
-        if (!res.confirm) {
-          resolve(null);
-          return;
-        }
-        resolve(String(res.content || '').trim());
-      },
-      fail: () => resolve(null),
-    });
-  });
-}
-
-// Prompts for an integer game-duration (minutes). Returns 0 = unlimited,
-// or null on cancel.
-function promptDuration(): Promise<number | null> {
-  return new Promise((resolve) => {
-    wx.showModal({
-      title: '游戏时长（分钟）',
-      content: '到时自动结算所有玩家，留空使用 30 分钟，输入 0 表示不限时',
-      editable: true,
-      placeholderText: String(DEFAULT_DURATION_MINUTES),
-      confirmText: '确认',
-      cancelText: '取消',
-      success: (res) => {
-        if (!res.confirm) {
-          resolve(null);
-          return;
-        }
-        const raw = String(res.content || '').trim();
-        if (raw === '') {
-          resolve(DEFAULT_DURATION_MINUTES);
-          return;
-        }
-        const n = Number(raw);
-        if (!Number.isFinite(n) || n < 0 || n > 1440) {
-          wx.showToast({ title: '请输入 0-1440 之间的数字', icon: 'none' });
-          resolve(null);
-          return;
-        }
-        resolve(Math.floor(n));
-      },
-      fail: () => resolve(null),
-    });
-  });
+function buildNavigateUrl(roomId: string, buyIn: number, password: string): string {
+  const params: Record<string, string> = { roomId, buyIn: String(buyIn) };
+  if (password) params.password = password;
+  const qs = Object.keys(params)
+    .map((k) => `${k}=${encodeURIComponent(params[k])}`)
+    .join('&');
+  return `/pages/table/table?${qs}`;
 }
 
 Page<PageData, PageMethods>({
@@ -180,13 +167,31 @@ Page<PageData, PageMethods>({
     rooms: buildRoomItems([]),
     myNickname: '',
     myAvatar: '',
+    myAvatarIsUrl: false,
     refreshing: false,
+
+    createOpen: false,
+    presets: PRESETS.map((p) => ({ ...p })),
+    createPresetIdx: 1, // 默认欢乐桌
+    createWithBots: false,
+    createDurationStr: String(DEFAULT_DURATION_MINUTES),
+    createPasswordStr: '',
+    createSubmitting: false,
+
+    joinPwOpen: false,
+    joinPwRoomId: '',
+    joinPwBuyIn: 0,
+    joinPwInput: '',
   },
 
   onShow() {
     const u = store.getUser();
     if (u) {
-      this.setData({ myNickname: u.nickname, myAvatar: u.avatar });
+      this.setData({
+        myNickname: u.nickname,
+        myAvatar: u.avatar,
+        myAvatarIsUrl: isUrlAvatar(u.avatar),
+      });
     }
     this.refresh();
   },
@@ -212,9 +217,7 @@ Page<PageData, PageMethods>({
     const idx = Number(e.currentTarget.dataset.index || 0);
     const item = this.data.rooms[idx];
     if (!item) return;
-    let id = item.id;
-    let password = '';
-    if (!id) {
+    if (!item.id) {
       // Preset that has no live room yet — create a fresh one with these blinds.
       const preset = PRESETS.find((p) => `${p.smallBlind}/${p.bigBlind}` === item.blinds);
       if (!preset) return;
@@ -229,79 +232,78 @@ Page<PageData, PageMethods>({
             durationMinutes: DEFAULT_DURATION_MINUTES,
           },
         });
-        id = resp.id;
+        wx.navigateTo({ url: buildNavigateUrl(resp.id, item.buyIn, '') });
       } catch (err) {
         wx.showToast({ title: '创建房间失败', icon: 'none' });
         console.warn('[lobby] create failed', err);
-        return;
       }
-    } else if (item.hasPassword) {
-      const entered = await promptPassword('请输入房间密码', '请输入房间密码');
-      if (entered === null) return;
-      password = entered;
+      return;
     }
-    const params: Record<string, string> = { roomId: id, buyIn: String(item.buyIn) };
-    if (password) params.password = password;
-    const qs = Object.keys(params)
-      .map((k) => `${k}=${encodeURIComponent(params[k])}`)
-      .join('&');
-    wx.navigateTo({ url: `/pages/table/table?${qs}` });
+    if (item.hasPassword) {
+      this.setData({
+        joinPwOpen: true,
+        joinPwRoomId: item.id,
+        joinPwBuyIn: item.buyIn,
+        joinPwInput: '',
+      });
+      return;
+    }
+    wx.navigateTo({ url: buildNavigateUrl(item.id, item.buyIn, '') });
   },
 
   onCreateRoom() {
-    const itemList = [
-      ...PRESETS.map((p) => `${p.name} · 盲注 ${p.smallBlind}/${p.bigBlind} · 带入 ${p.buyIn}`),
-      '🤖 单人模式（带 AI 对手）',
-    ];
-    wx.showActionSheet({
-      itemList,
-      success: async (res) => {
-        const aiIndex = PRESETS.length;
-        if (res.tapIndex === aiIndex) {
-          await this.createAIRoom();
-          return;
-        }
-        const preset = PRESETS[res.tapIndex];
-        if (!preset) return;
-
-        const duration = await promptDuration();
-        if (duration === null) return;
-        const password = await promptPassword(
-          '设置房间密码（可选）',
-          '留空则为公开房间',
-        );
-        if (password === null) return;
-        try {
-          const resp = await request<{ id: string }>({
-            url: '/rooms',
-            method: 'POST',
-            data: {
-              smallBlind: preset.smallBlind,
-              bigBlind: preset.bigBlind,
-              maxSeats: preset.maxSeats,
-              durationMinutes: duration,
-              password: password || undefined,
-            },
-          });
-          const params: Record<string, string> = {
-            roomId: resp.id,
-            buyIn: String(preset.buyIn),
-          };
-          if (password) params.password = password;
-          const qs = Object.keys(params)
-            .map((k) => `${k}=${encodeURIComponent(params[k])}`)
-            .join('&');
-          wx.navigateTo({ url: `/pages/table/table?${qs}` });
-        } catch (err) {
-          wx.showToast({ title: '创建失败', icon: 'none' });
-          console.warn('[lobby] create failed', err);
-        }
-      },
+    this.setData({
+      createOpen: true,
+      createPresetIdx: this.data.createPresetIdx,
+      createWithBots: false,
+      createDurationStr: String(DEFAULT_DURATION_MINUTES),
+      createPasswordStr: '',
+      createSubmitting: false,
     });
   },
 
-  async createAIRoom() {
-    const preset = PRESETS[1]; // default 50/100 buy-in 1000
+  onCreateCancel() {
+    if (this.data.createSubmitting) return;
+    this.setData({ createOpen: false });
+  },
+
+  onPickPreset(e) {
+    const idx = Number(e.currentTarget.dataset.idx || 0);
+    if (idx < 0 || idx >= PRESETS.length) return;
+    this.setData({ createPresetIdx: idx });
+  },
+
+  onToggleBots() {
+    this.setData({ createWithBots: !this.data.createWithBots });
+  },
+
+  onCreateDurationInput(e) {
+    const v = String((e.detail as { value?: string })?.value ?? '').replace(/[^0-9]/g, '');
+    this.setData({ createDurationStr: v });
+  },
+
+  onCreatePasswordInput(e) {
+    const raw = String((e.detail as { value?: string })?.value ?? '');
+    this.setData({ createPasswordStr: raw.slice(0, 32) });
+  },
+
+  async onCreateConfirm() {
+    if (this.data.createSubmitting) return;
+    const preset = PRESETS[this.data.createPresetIdx];
+    if (!preset) return;
+    const raw = this.data.createDurationStr.trim();
+    let duration = DEFAULT_DURATION_MINUTES;
+    if (raw !== '') {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || n > 1440) {
+        wx.showToast({ title: '时长需在 0-1440 之间', icon: 'none' });
+        return;
+      }
+      duration = Math.floor(n);
+    }
+    const password = this.data.createPasswordStr.trim();
+    const withBots = this.data.createWithBots;
+    this.setData({ createSubmitting: true });
     try {
       const resp = await request<{ id: string }>({
         url: '/rooms',
@@ -310,17 +312,43 @@ Page<PageData, PageMethods>({
           smallBlind: preset.smallBlind,
           bigBlind: preset.bigBlind,
           maxSeats: preset.maxSeats,
-          bots: 3,
-          botBuyIn: preset.buyIn,
-          durationMinutes: DEFAULT_DURATION_MINUTES,
+          durationMinutes: duration,
+          password: password || undefined,
+          bots: withBots ? 3 : 0,
+          botBuyIn: withBots ? preset.buyIn : undefined,
         },
       });
-      wx.navigateTo({ url: `/pages/table/table?roomId=${resp.id}&buyIn=${preset.buyIn}` });
+      this.setData({ createOpen: false, createSubmitting: false });
+      wx.navigateTo({ url: buildNavigateUrl(resp.id, preset.buyIn, password) });
     } catch (err) {
+      console.warn('[lobby] create failed', err);
       wx.showToast({ title: '创建失败', icon: 'none' });
-      console.warn('[lobby] AI create failed', err);
+      this.setData({ createSubmitting: false });
     }
   },
+
+  onJoinPwCancel() {
+    this.setData({ joinPwOpen: false, joinPwInput: '' });
+  },
+
+  onJoinPwInput(e) {
+    const raw = String((e.detail as { value?: string })?.value ?? '');
+    this.setData({ joinPwInput: raw.slice(0, 32) });
+  },
+
+  onJoinPwConfirm() {
+    const pw = this.data.joinPwInput.trim();
+    if (!pw) {
+      wx.showToast({ title: '请输入密码', icon: 'none' });
+      return;
+    }
+    const roomId = this.data.joinPwRoomId;
+    const buyIn = this.data.joinPwBuyIn;
+    this.setData({ joinPwOpen: false, joinPwInput: '' });
+    wx.navigateTo({ url: buildNavigateUrl(roomId, buyIn, pw) });
+  },
+
+  noop() {},
 
   onChangeName() {
     const cur = store.getUser();
@@ -339,3 +367,4 @@ Page<PageData, PageMethods>({
     });
   },
 });
+

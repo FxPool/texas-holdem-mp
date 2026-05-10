@@ -22,7 +22,13 @@
       >
         <view class="row-head">
           <view class="avatar-bubble">
-            <text class="avatar-emoji">{{c.avatar}}</text>
+            <image
+              wx:if="{{c.avatarIsUrl}}"
+              class="avatar-img"
+              src="{{c.avatar}}"
+              mode="aspectFill"
+            />
+            <text wx:else class="avatar-emoji">{{c.avatar}}</text>
           </view>
           <view class="head-meta">
             <text class="nickname">{{c.nickname}}</text>

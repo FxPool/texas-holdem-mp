@@ -56,6 +56,12 @@
   justify-content: center;
   border: 4rpx solid rgba(255, 246, 224, 0.4);
   box-shadow: 0 4rpx 10rpx rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
 }
 
 .seat.is-active .avatar {

@@ -21,8 +21,15 @@
     </view>
   </view>
 
-  <view wx:if="{{banner}}" class="banner">{{banner}}</view>
-  <view wx:if="{{endingHint && !banner}}" class="banner banner-end">{{endingHint}}</view>
+  <!-- 顶部提示横幅：覆盖在 stage-tag 上方，不抢占 table-zone 高度 -->
+  <view
+    wx:if="{{banner || endingHint}}"
+    class="banner-overlay"
+    style="top: calc({{statusBarHeight}}px + 100rpx);"
+  >
+    <view wx:if="{{banner}}" class="banner">{{banner}}</view>
+    <view wx:elif="{{endingHint}}" class="banner banner-end">{{endingHint}}</view>
+  </view>
 
   <block wx:if="{{table}}">
     <view class="stage-tag">{{table.stage}}</view>
@@ -105,7 +112,13 @@
         <view class="me-avatar-wrap">
           <view wx:if="{{isMyTurn}}" class="me-active-ring"></view>
           <view class="me-avatar">
-            <text class="me-avatar-emoji">{{myPlayer.avatar}}</text>
+            <image
+              wx:if="{{myPlayer.avatarIsUrl}}"
+              class="me-avatar-img"
+              src="{{myPlayer.avatar}}"
+              mode="aspectFill"
+            />
+            <text wx:else class="me-avatar-emoji">{{myPlayer.avatar}}</text>
           </view>
           <view wx:if="{{myPlayer.isDealer}}" class="me-badge me-badge-d">D</view>
           <view wx:elif="{{myPlayer.isBigBlind}}" class="me-badge me-badge-bb">BB</view>
@@ -141,9 +154,11 @@
 
     <view class="action-zone" wx:if="{{myPlayer}}">
       <view class="chat-trigger" catchtap="onToggleChatPicker">😀</view>
-      <view wx:if="{{table.stage === 'waiting'}}" class="wait-tip">等待更多玩家加入…</view>
-      <view wx:elif="{{table.stage === 'hand-complete'}}" class="wait-tip">本手结束，等待下一手…</view>
-      <view wx:elif="{{!isMyTurn}}" class="wait-tip">等待其他玩家行动…</view>
+      <view class="wait-slot">
+        <view wx:if="{{table.stage === 'waiting'}}" class="wait-tip">等待更多玩家加入…</view>
+        <view wx:elif="{{table.stage === 'hand-complete'}}" class="wait-tip">本手结束，等待下一手…</view>
+        <view wx:elif="{{!isMyTurn}}" class="wait-tip">等待其他玩家行动…</view>
+      </view>
       <p-action-bar
         can-check="{{canCheck}}"
         call-amount="{{callAmount}}"
@@ -175,7 +190,15 @@
         <block wx:for="{{settlementPlayers}}" wx:key="userId" wx:for-item="row">
           <view class="settlement-row">
             <view class="settlement-rank">{{row.rank}}</view>
-            <view class="settlement-avatar"><text>{{row.avatar}}</text></view>
+            <view class="settlement-avatar">
+              <image
+                wx:if="{{row.avatarIsUrl}}"
+                class="settlement-avatar-img"
+                src="{{row.avatar}}"
+                mode="aspectFill"
+              />
+              <text wx:else>{{row.avatar}}</text>
+            </view>
             <view class="settlement-meta">
               <text class="settlement-name">{{row.nickname}}</text>
               <text class="settlement-detail">筹码 {{row.chips}} · 带入 {{row.totalBuyIn}}</text>

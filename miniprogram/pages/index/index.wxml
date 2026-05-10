@@ -13,4 +13,50 @@
   <view class="footer">
     <text>仅供娱乐 · 虚拟筹码不可兑换</text>
   </view>
+
+  <!-- 微信资料授权弹窗：进入大厅时仅询问一次 -->
+  <view wx:if="{{profileOpen}}" class="modal-mask" catchtap="onProfileSkip">
+    <view class="modal-card" catchtap="noop">
+      <view class="modal-title">完善个人资料</view>
+      <view class="modal-sub">同意授权微信头像与昵称，让其他玩家也能认出你</view>
+
+      <view class="profile-avatar-row">
+        <button
+          class="avatar-pick-btn"
+          open-type="chooseAvatar"
+          bindchooseavatar="onChooseAvatar"
+        >
+          <image
+            wx:if="{{profileAvatarIsUrl}}"
+            class="profile-avatar-img"
+            src="{{profileAvatar}}"
+            mode="aspectFill"
+          />
+          <text wx:else class="profile-avatar-emoji">{{profileAvatar || '🙂'}}</text>
+          <text class="avatar-pick-tip">点击选择微信头像</text>
+        </button>
+      </view>
+
+      <view class="modal-section">
+        <text class="modal-label">昵称</text>
+        <input
+          class="modal-input"
+          type="nickname"
+          placeholder="点击填写微信昵称"
+          value="{{profileNickname}}"
+          bindinput="onNicknameInput"
+          maxlength="12"
+        />
+        <text class="modal-hint">点击输入框，微信会建议直接使用你的微信昵称</text>
+      </view>
+
+      <view class="modal-actions">
+        <view class="modal-btn modal-btn-ghost" catchtap="onProfileSkip">跳过</view>
+        <view
+          class="modal-btn modal-btn-primary {{profileSubmitting ? 'is-busy' : ''}}"
+          catchtap="onProfileConfirm"
+        >{{profileSubmitting ? '保存中…' : '确认进入'}}</view>
+      </view>
+    </view>
+  </view>
 </view>

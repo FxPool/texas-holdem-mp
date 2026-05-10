@@ -43,6 +43,7 @@ interface ShowdownContestant {
   userId: string;
   nickname: string;
   avatar: string;
+  avatarIsUrl: boolean;
   rankSlug: string;
   holeCards: Card[];
   amountWon: number;
@@ -388,9 +389,13 @@ Page<PageData, PageMethods>({
   },
 
   openSettlement(players: PlayerSettlement[]) {
+    const enriched = players.map((p) => ({
+      ...p,
+      avatarIsUrl: !!p.avatar && (p.avatar.indexOf('/') >= 0 || p.avatar.indexOf(':') >= 0),
+    }));
     this.setData({
       settlementVisible: true,
-      settlementPlayers: players,
+      settlementPlayers: enriched,
       // close the per-hand showdown panel so it doesn't double-stack
       showdownVisible: false,
       showdownContestants: [],
@@ -474,10 +479,12 @@ Page<PageData, PageMethods>({
     const contestants: ShowdownContestant[] = hands.map((h) => {
       const player = tbl.players.find((p) => p.uid === h.playerId);
       const won = wonByUid[h.playerId] || 0;
+      const av = player?.avatar || '🃏';
       return {
         userId: h.playerId,
         nickname: player?.nickname || h.playerId,
-        avatar: player?.avatar || '🃏',
+        avatar: av,
+        avatarIsUrl: !!av && (av.indexOf('/') >= 0 || av.indexOf(':') >= 0),
         rankSlug: h.rank,
         holeCards: h.holeCards,
         amountWon: won,

@@ -5,6 +5,7 @@ import type {
   WirePlayer,
   WireRoomState,
 } from '../types/game';
+import { isUrlAvatar } from './wx-profile';
 
 const ACTION_TIMEOUT_MS = 30_000;
 
@@ -55,6 +56,7 @@ function toUiPlayer(wp: WirePlayer, myUid: string, activeSeat: number): Player {
     uid: wp.userId,
     nickname: wp.nickname,
     avatar: wp.avatar,
+    avatarIsUrl: isUrlAvatar(wp.avatar),
     chips: wp.chips,
     betThisRound: wp.betThisRound,
     status: deriveStatus(wp, activeSeat),

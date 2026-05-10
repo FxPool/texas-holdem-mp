@@ -23,6 +23,7 @@ export interface Player {
   uid: string;
   nickname: string;
   avatar: string;
+  avatarIsUrl: boolean;
   chips: number;
   betThisRound: number;
   status: PlayerStatus;
@@ -108,6 +109,7 @@ export interface PlayerSettlement {
   userId: string;
   nickname: string;
   avatar: string;
+  avatarIsUrl?: boolean;
   seat: number;
   isBot: boolean;
   chips: number;

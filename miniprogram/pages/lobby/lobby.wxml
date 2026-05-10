@@ -6,7 +6,15 @@
 
   <!-- 我的身份卡 -->
   <view class="me-card" bindtap="onChangeName">
-    <view class="me-avatar"><text>{{myAvatar}}</text></view>
+    <view class="me-avatar">
+      <image
+        wx:if="{{myAvatarIsUrl}}"
+        class="me-avatar-img"
+        src="{{myAvatar}}"
+        mode="aspectFill"
+      />
+      <text wx:else>{{myAvatar}}</text>
+    </view>
     <view class="me-info">
       <text class="me-label">我</text>
       <text class="me-name">{{myNickname}} ›</text>
@@ -39,6 +47,98 @@
       </view>
       <view wx:if="{{item.isLive}}" class="room-id">#{{item.id}}</view>
       <view wx:else class="room-id room-id-empty">+ 开桌</view>
+    </view>
+  </view>
+
+  <!-- 创建房间弹窗 -->
+  <view wx:if="{{createOpen}}" class="modal-mask" catchtap="onCreateCancel">
+    <view class="modal-card" catchtap="noop">
+      <view class="modal-title">创建房间</view>
+
+      <view class="modal-section">
+        <text class="modal-label">盲注</text>
+        <view class="preset-grid">
+          <block wx:for="{{presets}}" wx:key="name" wx:for-item="p" wx:for-index="pidx">
+            <view
+              class="preset-cell {{createPresetIdx === pidx ? 'preset-cell-active' : ''}}"
+              data-idx="{{pidx}}"
+              bindtap="onPickPreset"
+            >
+              <text class="preset-name">{{p.name}}</text>
+              <text class="preset-blinds">{{p.smallBlind}}/{{p.bigBlind}}</text>
+              <text class="preset-buyin">带入 {{p.buyIn}}</text>
+            </view>
+          </block>
+        </view>
+      </view>
+
+      <view class="modal-section toggle-section" bindtap="onToggleBots">
+        <view class="toggle-text-wrap">
+          <text class="modal-label">带 AI 对手</text>
+          <text class="modal-hint">{{createWithBots ? '已开启 · 自动加入 3 位 AI' : '关闭 · 仅真人玩家'}}</text>
+        </view>
+        <view class="toggle-switch {{createWithBots ? 'on' : ''}}">
+          <view class="toggle-knob"></view>
+        </view>
+      </view>
+
+      <view class="modal-section">
+        <text class="modal-label">游戏时长</text>
+        <view class="modal-input-wrap">
+          <input
+            class="modal-input"
+            type="number"
+            value="{{createDurationStr}}"
+            placeholder="30"
+            bindinput="onCreateDurationInput"
+            maxlength="4"
+          />
+          <text class="modal-suffix">分钟</text>
+        </view>
+        <text class="modal-hint">到时本手打完即结算 · 输入 0 表示不限时</text>
+      </view>
+
+      <view class="modal-section">
+        <text class="modal-label">房间密码</text>
+        <input
+          class="modal-input"
+          value="{{createPasswordStr}}"
+          placeholder="留空 = 公开房间"
+          bindinput="onCreatePasswordInput"
+          maxlength="32"
+        />
+      </view>
+
+      <view class="modal-actions">
+        <view class="modal-btn modal-btn-ghost" catchtap="onCreateCancel">取消</view>
+        <view
+          class="modal-btn modal-btn-primary {{createSubmitting ? 'is-busy' : ''}}"
+          catchtap="onCreateConfirm"
+        >{{createSubmitting ? '创建中…' : '创建'}}</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 加入需密码房间 -->
+  <view wx:if="{{joinPwOpen}}" class="modal-mask" catchtap="onJoinPwCancel">
+    <view class="modal-card modal-card-sm" catchtap="noop">
+      <view class="modal-title">输入房间密码</view>
+      <view class="modal-sub">房间 #{{joinPwRoomId}} 需要密码进入</view>
+      <input
+        class="modal-input"
+        placeholder="请输入房间密码"
+        value="{{joinPwInput}}"
+        bindinput="onJoinPwInput"
+        focus="{{joinPwOpen}}"
+        confirm-type="done"
+        bindconfirm="onJoinPwConfirm"
+        password="{{true}}"
+        maxlength="32"
+      />
+      <view class="modal-actions">
+        <view class="modal-btn modal-btn-ghost" catchtap="onJoinPwCancel">取消</view>
+        <view class="modal-btn modal-btn-primary" catchtap="onJoinPwConfirm">加入</view>
+      </view>
     </view>
   </view>
 

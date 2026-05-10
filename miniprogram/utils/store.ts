@@ -21,6 +21,7 @@ export interface UserIdentity {
 const UID_STORAGE_KEY = 'tx_uid';
 const PROFILE_STORAGE_KEY = 'tx_profile';
 const TOKEN_STORAGE_KEY = 'tx_token';
+const PROFILE_ASKED_KEY = 'tx_profile_asked';
 
 const FRIENDLY_AVATARS = ['😎', '🦁', '🐱', '🐶', '🦊', '🐻', '🐰', '🐼', '🐯', '🐵'];
 
@@ -100,6 +101,23 @@ class Store {
     });
     if (patch.uid !== undefined) {
       wx.setStorageSync(UID_STORAGE_KEY, this.user.uid);
+    }
+  }
+
+  /** 是否已经向用户询问过微信头像/昵称。 */
+  hasAskedProfile(): boolean {
+    try {
+      return wx.getStorageSync(PROFILE_ASKED_KEY) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  markProfileAsked(): void {
+    try {
+      wx.setStorageSync(PROFILE_ASKED_KEY, true);
+    } catch {
+      // ignore
     }
   }
 

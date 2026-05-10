@@ -9,7 +9,13 @@
   <view class="avatar-wrap">
     <timer-ring wx:if="{{isActive}}" deadline="{{deadline}}" duration="{{30}}" />
     <view class="avatar">
-      <text class="avatar-emoji">{{player.avatar}}</text>
+      <image
+        wx:if="{{player.avatarIsUrl}}"
+        class="avatar-img"
+        src="{{player.avatar}}"
+        mode="aspectFill"
+      />
+      <text wx:else class="avatar-emoji">{{player.avatar}}</text>
     </view>
     <view wx:if="{{player.isDealer}}" class="badge badge-dealer">D</view>
     <view wx:elif="{{player.isSmallBlind}}" class="badge badge-sb">SB</view>
