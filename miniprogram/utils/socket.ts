@@ -261,4 +261,4 @@ export const gameSocket = new GameSocket();
 //
 // 模拟器开发用 localhost；真机扫码必须用电脑在 LAN 内的 IP（手机和电脑同 WiFi）
 // 查 LAN IP：mac/Linux `ifconfig | grep "inet "`、Windows `ipconfig`
-export const DEFAULT_WS_URL = 'ws://192.168.1.6:18080/ws';
+export const DEFAULT_WS_URL = 'wss://www.zhoudegame.xyz/ws';

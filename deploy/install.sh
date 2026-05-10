@@ -310,7 +310,7 @@ install_caddy_if_missing() {
         return
     fi
     step "Installing Caddy"
-    apt-get update -qq
+    apt-get update -qq 2>/dev/null || warn "apt-get update had errors (non-fatal, continuing)"
     apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gpg
     if [ ! -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg ]; then
         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
@@ -320,7 +320,7 @@ install_caddy_if_missing() {
         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
             > /etc/apt/sources.list.d/caddy-stable.list
     fi
-    apt-get update -qq
+    apt-get update -qq 2>/dev/null || warn "apt-get update had errors (non-fatal, continuing)"
     apt-get install -y caddy
 }
 
@@ -333,7 +333,7 @@ write_caddyfile() {
     fi
 
     mkdir -p /var/log/caddy
-    chown caddy:caddy /var/log/caddy 2>/dev/null || true
+    chown -R caddy:caddy /var/log/caddy 2>/dev/null || true
 
     cat > "$CADDYFILE" <<EOF
 ${hosts} {

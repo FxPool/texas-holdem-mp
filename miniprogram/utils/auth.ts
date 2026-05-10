@@ -24,12 +24,28 @@ interface LoginPayload {
 function wxLoginCode(): Promise<string> {
   return new Promise((resolve) => {
     if (!wx.login) {
+      console.warn('[auth] wx.login not available');
       resolve('');
       return;
     }
+    console.log('[auth] wx.login calling...');
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.warn('[auth] wx.login timed out after 5s, proceeding without code');
+        resolve('');
+      }
+    }, 5000);
     wx.login({
-      success: (res) => resolve(res.code || ''),
-      fail: () => resolve(''),
+      success: (res) => {
+        console.log('[auth] wx.login success, code:', res.code ? 'obtained' : 'empty');
+        if (!resolved) { resolved = true; clearTimeout(timer); resolve(res.code || ''); }
+      },
+      fail: (err) => {
+        console.warn('[auth] wx.login fail:', JSON.stringify(err));
+        if (!resolved) { resolved = true; clearTimeout(timer); resolve(''); }
+      },
     });
   });
 }
@@ -39,13 +55,16 @@ function wxLoginCode(): Promise<string> {
  * token if it isn't close to expiring. Throws on network or backend error.
  */
 export async function ensureLoggedIn(force = false): Promise<string> {
+  console.log('[auth] ensureLoggedIn start');
   const user = store.getUser();
   if (!user) throw new Error('store not initialized');
   if (!force && !store.tokenStale()) {
+    console.log('[auth] token still valid, skipping login');
     return user.token;
   }
 
   const code = await wxLoginCode();
+  console.log('[auth] got code, calling /login...');
   const payload: LoginPayload = {
     code,
     userId: user.uid,
@@ -57,6 +76,7 @@ export async function ensureLoggedIn(force = false): Promise<string> {
     method: 'POST',
     data: payload,
   });
+  console.log('[auth] /login response:', JSON.stringify(resp));
   if (!resp || !resp.token) {
     throw new Error('login response missing token');
   }

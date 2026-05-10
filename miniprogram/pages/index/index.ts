@@ -12,8 +12,7 @@ Page({
     ensureConsent();
   },
   async onEnterLobby() {
-    const ok = await ensureConsent();
-    if (!ok) return;
+    console.log('[index] onEnterLobby tapped');
     wx.navigateTo({ url: '/pages/lobby/lobby' });
   },
   async onQuickPlay() {
