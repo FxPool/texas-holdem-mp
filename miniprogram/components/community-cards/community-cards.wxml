@@ -1,6 +1,9 @@
 <view class="community">
   <block wx:for="{{slots}}" wx:key="*this" wx:for-item="i">
-    <view class="slot {{flipFlags[i] ? 'is-flipping' : ''}}">
+    <view
+      class="slot {{flipFlags[i] ? 'is-flipping' : ''}}"
+      style="{{flipFlags[i] ? 'animation-delay:' + flipDelays[i] + 'ms' : ''}}"
+    >
       <p-card
         wx:if="{{cards[i]}}"
         size="md"

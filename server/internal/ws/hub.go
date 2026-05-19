@@ -515,6 +515,14 @@ func (h *Hub) HandleDisconnect(c *Conn) {
 		return
 	}
 	uid := c.UserID
+	// If the user already explicitly left (CMsgLeave ran first and removed
+	// them), don't schedule a soft-leave grace timer — they're gone for good.
+	// Otherwise a stale disconnect timer would block MaybeDeleteEmptyRoom for
+	// the full grace window when multiple players exit at once.
+	if !room.HasPlayer(uid) {
+		h.MaybeDeleteEmptyRoom(c.RoomID)
+		return
+	}
 	// Tell others the player went offline (UI can grey them out).
 	h.broadcastExcept(room, uid, ServerMessage{
 		Type: SMsgPlayerLeft,

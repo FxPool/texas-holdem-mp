@@ -1,6 +1,6 @@
 <view class="seat status-{{player.status}} {{isActive ? 'is-active' : ''}}" wx:if="{{player}}">
-  <!-- 对手手牌（背面），扇形夹在头像后方 -->
-  <view class="holecards" wx:if="{{player.status !== 'folded'}}">
+  <!-- 对手手牌（背面），扇形夹在头像后方。只在本手进行中显示。 -->
+  <view class="holecards" wx:if="{{hasHand && player.status !== 'folded' && player.status !== 'sit-out'}}">
     <view class="hc hc-1"><p-card size="sm" revealed="{{false}}" /></view>
     <view class="hc hc-2"><p-card size="sm" revealed="{{false}}" /></view>
   </view>
@@ -17,9 +17,10 @@
       />
       <text wx:else class="avatar-emoji">{{player.avatar}}</text>
     </view>
-    <view wx:if="{{player.isDealer}}" class="badge badge-dealer">D</view>
-    <view wx:elif="{{player.isSmallBlind}}" class="badge badge-sb">SB</view>
-    <view wx:elif="{{player.isBigBlind}}" class="badge badge-bb">BB</view>
+    <view wx:if="{{player.isDealer}}" class="badge badge-dealer">庄</view>
+    <view wx:elif="{{player.isSmallBlind}}" class="badge badge-sb">小盲</view>
+    <view wx:elif="{{player.isBigBlind}}" class="badge badge-bb">大盲</view>
+    <view wx:elif="{{player.isUTG}}" class="badge badge-utg">枪口</view>
   </view>
 
   <!-- 信息卡 -->

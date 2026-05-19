@@ -1,6 +1,6 @@
 .seat {
   position: relative;
-  width: 150rpx;
+  width: 130rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -15,7 +15,7 @@
 /* 手牌背面：在头像后方扇形夹角 */
 .holecards {
   position: absolute;
-  top: -10rpx;
+  top: -6rpx;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -29,17 +29,17 @@
 }
 
 .hc-1 {
-  transform: translateX(20rpx) rotate(-12deg);
+  transform: translateX(16rpx) rotate(-12deg);
 }
 
 .hc-2 {
-  transform: translateX(-20rpx) rotate(12deg);
+  transform: translateX(-16rpx) rotate(12deg);
 }
 
 .avatar-wrap {
   position: relative;
-  width: 100rpx;
-  height: 100rpx;
+  width: 80rpx;
+  height: 80rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -47,14 +47,14 @@
 }
 
 .avatar {
-  width: 88rpx;
-  height: 88rpx;
+  width: 72rpx;
+  height: 72rpx;
   border-radius: 50%;
   background: linear-gradient(135deg, #FFF6E0 0%, #FFD66B 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 4rpx solid rgba(255, 246, 224, 0.4);
+  border: 3rpx solid rgba(255, 246, 224, 0.4);
   box-shadow: 0 4rpx 10rpx rgba(0,0,0,0.25);
   overflow: hidden;
 }
@@ -66,11 +66,11 @@
 
 .seat.is-active .avatar {
   border-color: #FFD66B;
-  box-shadow: 0 0 24rpx #FFD66B;
+  box-shadow: 0 0 20rpx #FFD66B;
 }
 
 .avatar-emoji {
-  font-size: 52rpx;
+  font-size: 42rpx;
   line-height: 1;
 }
 
@@ -78,13 +78,13 @@
   position: absolute;
   bottom: -4rpx;
   right: -4rpx;
-  min-width: 34rpx;
-  height: 34rpx;
+  min-width: 30rpx;
+  height: 30rpx;
   padding: 0 8rpx;
-  border-radius: 17rpx;
+  border-radius: 15rpx;
   background: #FFD66B;
   color: #4A2E00;
-  font-size: 22rpx;
+  font-size: 18rpx;
   font-weight: 800;
   display: flex;
   align-items: center;
@@ -95,23 +95,24 @@
 
 .badge-sb { background: #6BB6FF; color: #fff; }
 .badge-bb { background: #FF6B7A; color: #fff; }
+.badge-utg { background: #B879FF; color: #fff; }
 
 .info {
-  margin-top: 6rpx;
+  margin-top: 4rpx;
   background: rgba(20, 12, 40, 0.85);
-  border-radius: 24rpx;
-  padding: 6rpx 16rpx;
+  border-radius: 22rpx;
+  padding: 4rpx 12rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 120rpx;
+  min-width: 100rpx;
   z-index: 3;
 }
 
 .nickname {
-  font-size: 22rpx;
+  font-size: 20rpx;
   color: #FFF6E0;
-  max-width: 110rpx;
+  max-width: 100rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -124,8 +125,8 @@
   margin-top: 2rpx;
 }
 
-.chips-icon { color: #FFD66B; font-size: 20rpx; }
-.chips-num { font-size: 24rpx; color: #FFD66B; font-weight: 700; }
+.chips-icon { color: #FFD66B; font-size: 18rpx; }
+.chips-num { font-size: 22rpx; color: #FFD66B; font-weight: 700; }
 
 .state-tag {
   position: absolute;

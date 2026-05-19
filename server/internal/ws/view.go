@@ -22,6 +22,7 @@ func BuildRoomStateView(r *Room, viewerUserID string) RoomStateView {
 		RoomID:          r.ID,
 		SmallBlind:      r.Config.SmallBlind,
 		BigBlind:        r.Config.BigBlind,
+		MaxSeats:        r.Config.MaxSeats,
 		ActiveSeat:      -1,
 		DealerSeat:      -1,
 		ViewerSeat:      -1,
@@ -39,12 +40,13 @@ func BuildRoomStateView(r *Room, viewerUserID string) RoomStateView {
 				view.ViewerSeat = m.Seat
 			}
 			view.Players = append(view.Players, PlayerView{
-				UserID:   m.UserID,
-				Seat:     m.Seat,
-				Nickname: m.Nickname,
-				Avatar:   m.Avatar,
-				Chips:    m.BuyIn,
-				State:    "waiting",
+				UserID:     m.UserID,
+				Seat:       m.Seat,
+				Nickname:   m.Nickname,
+				Avatar:     m.Avatar,
+				Chips:      m.BuyIn,
+				State:      "waiting",
+				RebuyCount: m.RebuyCount,
 			})
 		}
 		return view
@@ -74,9 +76,11 @@ func BuildRoomStateView(r *Room, viewerUserID string) RoomStateView {
 			holeCards = append([]game.Card{}, p.HoleCards...)
 		}
 		nickname, avatar := "", ""
+		rebuyCount := 0
 		if meta != nil {
 			nickname = meta.Nickname
 			avatar = meta.Avatar
+			rebuyCount = meta.RebuyCount
 		}
 		view.Players = append(view.Players, PlayerView{
 			UserID:       p.ID,
@@ -91,6 +95,7 @@ func BuildRoomStateView(r *Room, viewerUserID string) RoomStateView {
 			IsDealer:     p.Seat == r.engine.DealerSeat,
 			IsSmallBlind: p.Seat == sbSeat,
 			IsBigBlind:   p.Seat == bbSeat,
+			RebuyCount:   rebuyCount,
 		})
 	}
 	return view

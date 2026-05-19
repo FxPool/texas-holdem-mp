@@ -42,6 +42,7 @@ type PlayerMetaSnapshot struct {
 	Seat       int    `json:"seat"`
 	BuyIn      int    `json:"buyIn"`
 	TotalBuyIn int    `json:"totalBuyIn"`
+	RebuyCount int    `json:"rebuyCount,omitempty"`
 }
 
 // UserStatsSnap is the persistent counterpart of in-memory user stats.
@@ -245,6 +246,7 @@ func snapshotRoom(r *Room) RoomSnapshot {
 			Seat:       m.Seat,
 			BuyIn:      m.BuyIn,
 			TotalBuyIn: total,
+			RebuyCount: m.RebuyCount,
 		})
 	}
 	sort.Slice(metas, func(i, j int) bool { return metas[i].Seat < metas[j].Seat })
@@ -294,6 +296,7 @@ func loadRoomFromSnapshot(s RoomSnapshot) *Room {
 			Seat:       p.Seat,
 			BuyIn:      p.BuyIn,
 			TotalBuyIn: total,
+			RebuyCount: p.RebuyCount,
 		}
 		r.players[p.UserID] = &meta
 	}

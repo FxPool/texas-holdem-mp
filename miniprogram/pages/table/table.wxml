@@ -60,22 +60,17 @@
               is-active="{{player.seat === table.activeSeat}}"
               deadline="{{table.actionDeadline}}"
               show-hole-cards="{{false}}"
+              has-hand="{{handInProgress}}"
             />
           </view>
         </block>
 
-        <!-- 发牌动画层（仅在 isDealing 时显示） -->
+        <!-- 发牌动画层：从中央依次飞向每个座位（两轮，每轮一张） -->
         <block wx:if="{{isDealing}}">
-          <view class="deal-card deal-to-me"></view>
-          <view class="deal-card deal-to-me delay-1"></view>
-          <block wx:for="{{opponents}}" wx:key="seat" wx:for-item="player">
+          <block wx:for="{{dealCards}}" wx:key="id" wx:for-item="dc">
             <view
-              class="deal-card deal-to-pos"
-              style="--target-top: {{opponentPositions[player.posKey].top}}; --target-left: {{opponentPositions[player.posKey].left}};"
-            ></view>
-            <view
-              class="deal-card deal-to-pos delay-1"
-              style="--target-top: {{opponentPositions[player.posKey].top}}; --target-left: {{opponentPositions[player.posKey].left}};"
+              class="deal-card {{dc.isMe ? 'deal-to-me' : 'deal-to-pos'}}"
+              style="animation-delay: {{dc.delay}}ms; --target-top: {{dc.toTop}}; --target-left: {{dc.toLeft}};"
             ></view>
           </block>
         </block>
@@ -101,12 +96,13 @@
     </view>
 
     <view wx:if="{{myPlayer}}" class="me-zone {{isMyTurn ? 'is-my-turn' : ''}}">
-      <view class="me-cards">
+      <view class="me-cards {{myCardsRevealed ? 'is-revealed' : ''}}" bindtap="onToggleMyCards">
         <block wx:for="{{myCardsView}}" wx:key="index">
           <view class="me-card-tilt tilt-{{index}}">
-            <p-card size="lg" suit="{{item.suit}}" rank="{{item.rank}}" revealed="{{true}}" />
+            <p-card size="lg" suit="{{item.suit}}" rank="{{item.rank}}" revealed="{{myCardsRevealed}}" />
           </view>
         </block>
+        <view wx:if="{{myCardsView.length > 0 && !myCardsRevealed}}" class="me-cards-hint">👆 点击查看</view>
       </view>
       <view class="me-info-row">
         <view class="me-avatar-wrap">
@@ -120,9 +116,10 @@
             />
             <text wx:else class="me-avatar-emoji">{{myPlayer.avatar}}</text>
           </view>
-          <view wx:if="{{myPlayer.isDealer}}" class="me-badge me-badge-d">D</view>
-          <view wx:elif="{{myPlayer.isBigBlind}}" class="me-badge me-badge-bb">BB</view>
-          <view wx:elif="{{myPlayer.isSmallBlind}}" class="me-badge me-badge-sb">SB</view>
+          <view wx:if="{{myPlayer.isDealer}}" class="me-badge me-badge-d">庄</view>
+          <view wx:elif="{{myPlayer.isBigBlind}}" class="me-badge me-badge-bb">大盲</view>
+          <view wx:elif="{{myPlayer.isSmallBlind}}" class="me-badge me-badge-sb">小盲</view>
+          <view wx:elif="{{myPlayer.isUTG}}" class="me-badge me-badge-utg">枪口</view>
         </view>
         <view class="me-meta">
           <text class="me-name">{{myPlayer.nickname}}</text>
@@ -136,10 +133,14 @@
           <text class="me-bet-num">已下 {{myPlayer.betThisRound}}</text>
         </view>
         <view
-          wx:elif="{{myPlayer.chips === 0 && (table.stage === 'waiting' || table.stage === 'hand-complete')}}"
+          wx:elif="{{myPlayer.chips === 0 && myPlayer.rebuyCount === 0 && (table.stage === 'waiting' || table.stage === 'hand-complete')}}"
           class="rebuy-btn"
           bindtap="onRebuy"
         >+ 加买</view>
+        <view
+          wx:elif="{{myPlayer.chips === 0 && myPlayer.rebuyCount > 0 && (table.stage === 'waiting' || table.stage === 'hand-complete')}}"
+          class="rebuy-btn rebuy-btn-disabled"
+        >已用完加买</view>
       </view>
     </view>
 

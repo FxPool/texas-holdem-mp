@@ -45,8 +45,12 @@
           </block>
         </view>
       </view>
-      <view wx:if="{{item.isLive}}" class="room-id">#{{item.id}}</view>
-      <view wx:else class="room-id room-id-empty">+ 开桌</view>
+      <view class="room-id">#{{item.id}}</view>
+    </view>
+    <view wx:if="{{rooms.length === 0 && !refreshing}}" class="room-empty" bindtap="onCreateRoom">
+      <text class="room-empty-icon">🃏</text>
+      <text class="room-empty-title">还没有人开桌</text>
+      <text class="room-empty-hint">点击右上角「+ 创建」开个新桌吧</text>
     </view>
   </view>
 

@@ -20,7 +20,6 @@ interface RoomItem {
   blinds: string;
   buyIn: number;
   seats: string;
-  isLive: boolean;
   hasPassword: boolean;
   durationMinutes: number;
   endsAt: number;
@@ -31,9 +30,9 @@ const DEFAULT_DURATION_MINUTES = 30;
 const LOBBY_POLL_INTERVAL_MS = 5000;
 
 const PRESETS: Array<{ name: string; smallBlind: number; bigBlind: number; buyIn: number; maxSeats: number }> = [
-  { name: '萌新练手', smallBlind: 20, bigBlind: 50, buyIn: 500, maxSeats: 6 },
-  { name: '欢乐桌', smallBlind: 50, bigBlind: 100, buyIn: 1000, maxSeats: 6 },
-  { name: '高手互砍', smallBlind: 500, bigBlind: 1000, buyIn: 5000, maxSeats: 6 },
+  { name: '萌新练手', smallBlind: 20, bigBlind: 50, buyIn: 500, maxSeats: 9 },
+  { name: '欢乐桌', smallBlind: 50, bigBlind: 100, buyIn: 1000, maxSeats: 9 },
+  { name: '高手互砍', smallBlind: 500, bigBlind: 1000, buyIn: 5000, maxSeats: 9 },
 ];
 
 interface PresetView {
@@ -90,61 +89,18 @@ interface PageMethods {
 }
 
 function buildRoomItems(server: ServerRoomSummary[]): RoomItem[] {
-  // Preset slots stay at the top so the lobby has content even when no live
-  // rooms exist. The first public live room with matching blinds gets promoted
-  // into its preset slot to surface its player count; every other live room
-  // (additional same-blind rooms, non-preset blinds, private rooms) is listed
-  // below. Dedup by room id, not by blinds, so multiple rooms with identical
-  // blinds all stay visible.
-  const firstByBlinds = new Map<string, ServerRoomSummary>();
-  for (const s of server) {
-    if (s.hasPassword) continue;
-    if (s.ended) continue;
-    const key = `${s.smallBlind}/${s.bigBlind}`;
-    if (!firstByBlinds.has(key)) firstByBlinds.set(key, s);
-  }
-  const promotedIds = new Set<string>();
-  const items: RoomItem[] = PRESETS.map((p) => {
-    const key = `${p.smallBlind}/${p.bigBlind}`;
-    const live = firstByBlinds.get(key);
-    if (live) {
-      promotedIds.add(live.id);
-      return {
-        id: live.id,
-        name: p.name,
-        blinds: key,
-        buyIn: p.buyIn,
-        seats: `${live.players}/${live.maxSeats}`,
-        isLive: true,
-        hasPassword: !!live.hasPassword,
-        durationMinutes: live.durationMinutes || 0,
-        endsAt: live.endsAt || 0,
-        ended: !!live.ended,
-      };
-    }
-    return {
-      id: '',
-      name: p.name,
-      blinds: key,
-      buyIn: p.buyIn,
-      seats: `0/${p.maxSeats}`,
-      isLive: false,
-      hasPassword: false,
-      durationMinutes: 0,
-      endsAt: 0,
-      ended: false,
-    };
-  });
+  // Only show rooms that actually exist on the server (player-created). When
+  // there are none, the lobby renders an empty-state hint instead of synthetic
+  // preset rows. Presets are still kept for the create-room dialog below.
+  const items: RoomItem[] = [];
   for (const s of server) {
     if (s.ended) continue;
-    if (promotedIds.has(s.id)) continue;
     items.push({
       id: s.id,
       name: (s.hasPassword ? '🔒 ' : '') + '#' + s.id,
       blinds: `${s.smallBlind}/${s.bigBlind}`,
       buyIn: s.bigBlind * 10,
       seats: `${s.players}/${s.maxSeats}`,
-      isLive: true,
       hasPassword: !!s.hasPassword,
       durationMinutes: s.durationMinutes || 0,
       endsAt: s.endsAt || 0,
@@ -244,29 +200,7 @@ Page<PageData, PageMethods>({
   async onJoinRoom(e) {
     const idx = Number(e.currentTarget.dataset.index || 0);
     const item = this.data.rooms[idx];
-    if (!item) return;
-    if (!item.id) {
-      // Preset that has no live room yet — create a fresh one with these blinds.
-      const preset = PRESETS.find((p) => `${p.smallBlind}/${p.bigBlind}` === item.blinds);
-      if (!preset) return;
-      try {
-        const resp = await request<{ id: string }>({
-          url: '/rooms',
-          method: 'POST',
-          data: {
-            smallBlind: preset.smallBlind,
-            bigBlind: preset.bigBlind,
-            maxSeats: preset.maxSeats,
-            durationMinutes: DEFAULT_DURATION_MINUTES,
-          },
-        });
-        wx.navigateTo({ url: buildNavigateUrl(resp.id, item.buyIn, '') });
-      } catch (err) {
-        wx.showToast({ title: '创建房间失败', icon: 'none' });
-        console.warn('[lobby] create failed', err);
-      }
-      return;
-    }
+    if (!item || !item.id) return;
     if (item.hasPassword) {
       this.setData({
         joinPwOpen: true,
@@ -342,7 +276,7 @@ Page<PageData, PageMethods>({
           maxSeats: preset.maxSeats,
           durationMinutes: duration,
           password: password || undefined,
-          bots: withBots ? 3 : 0,
+          bots: withBots ? 4 : 0,
           botBuyIn: withBots ? preset.buyIn : undefined,
         },
       });

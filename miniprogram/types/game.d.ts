@@ -32,6 +32,8 @@ export interface Player {
   isDealer: boolean;
   isSmallBlind: boolean;
   isBigBlind: boolean;
+  isUTG: boolean;
+  rebuyCount: number;
 }
 
 export type GameStage = 'preflop' | 'flop' | 'turn' | 'river' | 'showdown' | 'hand-complete' | 'waiting';
@@ -82,6 +84,7 @@ export interface WirePlayer {
   isDealer: boolean;
   isSmallBlind: boolean;
   isBigBlind: boolean;
+  rebuyCount?: number;
 }
 
 export interface WireRoomState {
@@ -94,6 +97,7 @@ export interface WireRoomState {
   dealerSeat: number;
   smallBlind: number;
   bigBlind: number;
+  maxSeats: number;
   community: Card[];
   revealedCount: number;
   players: WirePlayer[];

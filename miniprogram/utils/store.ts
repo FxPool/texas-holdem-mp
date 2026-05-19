@@ -1,5 +1,4 @@
 import type { WireRoomState } from '../types/game';
-import { HTTP_BASE } from './env';
 
 interface SystemInfo {
   windowWidth: number;
@@ -58,25 +57,27 @@ class Store {
       };
       wx.setStorageSync(PROFILE_STORAGE_KEY, profile);
     }
-    // Token 绑定签发时的 base URL。切换 env（LAN ↔ prod）后 base URL 变化，
-    // 旧 token 用另一个 signer secret 签的，对当前服务端来说无效 → 视为已失效，
-    // 强制重新登录拿新 token。
-    const tokenInfo =
-      (wx.getStorageSync(TOKEN_STORAGE_KEY) as { token: string; expiresAt: number; env?: string } | null) || null;
-    const tokenMatchesEnv = !!tokenInfo && tokenInfo.env === HTTP_BASE;
+    // Token 不持久化：每次冷启动都重新调用 /login 拿新 token，避免新版本
+    // 服务端（不同签发密钥 / 协议字段变更）拒绝旧 token。一次性清理历史遗留
+    // 的存储项，老用户首次升级后就再也不会有脏数据。
+    try {
+      wx.removeStorageSync(TOKEN_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     this.user = {
       uid,
       nickname: profile.nickname || '玩家',
       avatar: profile.avatar || '😎',
-      token: tokenMatchesEnv ? tokenInfo!.token : '',
-      tokenExpiresAt: tokenMatchesEnv ? tokenInfo!.expiresAt : 0,
+      token: '',
+      tokenExpiresAt: 0,
     };
   }
 
   setToken(token: string, expiresAt: number): void {
     if (!this.user) return;
+    // 仅放进内存——下次冷启动会重新登录。
     this.user = { ...this.user, token, tokenExpiresAt: expiresAt };
-    wx.setStorageSync(TOKEN_STORAGE_KEY, { token, expiresAt, env: HTTP_BASE });
   }
 
   /** Returns true when no token exists or it expires within `bufferSec` seconds. */

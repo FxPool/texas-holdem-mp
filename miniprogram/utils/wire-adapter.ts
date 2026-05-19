@@ -19,7 +19,8 @@ export function wireToTable(
   myUid: string,
   prev: TableState | null,
 ): TableState {
-  const players: Player[] = wire.players.map((wp) => toUiPlayer(wp, myUid, wire.activeSeat));
+  const utgSeat = deriveUTGSeat(wire);
+  const players: Player[] = wire.players.map((wp) => toUiPlayer(wp, myUid, wire.activeSeat, utgSeat));
   // sort by seat for stable rendering
   players.sort((a, b) => a.seat - b.seat);
 
@@ -30,7 +31,7 @@ export function wireToTable(
 
   return {
     roomId: wire.roomId,
-    maxSeats: 6,
+    maxSeats: wire.maxSeats > 0 ? wire.maxSeats : 9,
     players,
     communityCards: wire.community || [],
     revealedCount: wire.revealedCount,
@@ -49,7 +50,7 @@ export function wireToTable(
   };
 }
 
-function toUiPlayer(wp: WirePlayer, myUid: string, activeSeat: number): Player {
+function toUiPlayer(wp: WirePlayer, myUid: string, activeSeat: number, utgSeat: number): Player {
   const isMe = wp.userId === myUid;
   return {
     seat: wp.seat,
@@ -65,7 +66,22 @@ function toUiPlayer(wp: WirePlayer, myUid: string, activeSeat: number): Player {
     isDealer: wp.isDealer,
     isSmallBlind: wp.isSmallBlind,
     isBigBlind: wp.isBigBlind,
+    isUTG: utgSeat > 0 && wp.seat === utgSeat,
+    rebuyCount: wp.rebuyCount ?? 0,
   };
+}
+
+// UTG = first to act preflop = next non-sit-out seat after BB.
+// Returns -1 when fewer than 3 players are in the hand (heads-up has no UTG;
+// 3-handed UTG coincides with the dealer button so we leave the D badge alone).
+function deriveUTGSeat(wire: WireRoomState): number {
+  const inHand = wire.players
+    .filter((p) => p.state !== 'sit-out')
+    .sort((a, b) => a.seat - b.seat);
+  if (inHand.length < 4) return -1;
+  const bbIdx = inHand.findIndex((p) => p.isBigBlind);
+  if (bbIdx < 0) return -1;
+  return inHand[(bbIdx + 1) % inHand.length].seat;
 }
 
 function deriveStatus(wp: WirePlayer, activeSeat: number): PlayerStatus {

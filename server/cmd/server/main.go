@@ -17,7 +17,7 @@ func main() {
 	hub := ws.NewHub(ws.RoomConfig{
 		SmallBlind: 50,
 		BigBlind:   100,
-		MaxSeats:   6,
+		MaxSeats:   9,
 		MinPlayers: 2,
 	})
 

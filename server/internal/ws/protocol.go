@@ -101,6 +101,7 @@ type PlayerView struct {
 	IsDealer     bool        `json:"isDealer"`
 	IsSmallBlind bool        `json:"isSmallBlind"`
 	IsBigBlind   bool        `json:"isBigBlind"`
+	RebuyCount   int         `json:"rebuyCount"`
 }
 
 // RoomStateView is the full snapshot a client receives. Built per-viewer.
@@ -114,6 +115,7 @@ type RoomStateView struct {
 	DealerSeat      int          `json:"dealerSeat"`
 	SmallBlind      int          `json:"smallBlind"`
 	BigBlind        int          `json:"bigBlind"`
+	MaxSeats        int          `json:"maxSeats"`
 	Community       []game.Card  `json:"community"`
 	RevealedCount   int          `json:"revealedCount"`
 	Players         []PlayerView `json:"players"`

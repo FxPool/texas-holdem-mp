@@ -1,15 +1,11 @@
 <view class="card-wrap size-{{size}}">
   <view wx:if="{{placeholder}}" class="card-placeholder"></view>
   <view wx:elif="{{revealed && rank}}" class="card-face card-front color-{{color}}">
-    <view class="corner top-left">
+    <view class="top-left">
       <text class="rank">{{rank}}</text>
-      <text class="suit">{{symbol}}</text>
+      <text class="suit-small">{{symbol}}</text>
     </view>
-    <view class="center-suit">{{symbol}}</view>
-    <view class="corner bottom-right">
-      <text class="rank">{{rank}}</text>
-      <text class="suit">{{symbol}}</text>
-    </view>
+    <view class="suit-big">{{symbol}}</view>
   </view>
   <view wx:else class="card-face card-back">
     <view class="back-pattern"></view>

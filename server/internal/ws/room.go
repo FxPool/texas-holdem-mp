@@ -13,7 +13,7 @@ import (
 type RoomConfig struct {
 	SmallBlind      int
 	BigBlind        int
-	MaxSeats        int    // default 6
+	MaxSeats        int    // default 9
 	MinPlayers      int    // default 2; hand can start once this many seated
 	Password        string // optional; empty = public room
 	DurationMinutes int    // 0 = no limit; otherwise auto-end after this many minutes
@@ -27,6 +27,7 @@ type PlayerMeta struct {
 	TotalBuyIn int  // cumulative chips brought in (initial + rebuys), for settlement
 	Seat       int  // assigned at Join, persistent across hands while in room
 	IsBot      bool // true for AI-controlled players (uid prefix `bot:`)
+	RebuyCount int  // how many rebuys the player has already used this session
 }
 
 // Room owns one Engine plus connections. All mutations through r.mu.
@@ -61,7 +62,7 @@ type Room struct {
 
 func NewRoom(id string, cfg RoomConfig) *Room {
 	if cfg.MaxSeats == 0 {
-		cfg.MaxSeats = 6
+		cfg.MaxSeats = 9
 	}
 	if cfg.MinPlayers == 0 {
 		cfg.MinPlayers = 2
@@ -477,6 +478,11 @@ func (r *Room) recomputeBlindSeatsLocked() {
 // Production deployments can wire this to per-room config.
 const MaxRebuyAmount = 100_000
 
+// MaxRebuysPerSession is how many rebuys a single player may use across the
+// lifetime of one room session. Set to 1 so a bust-out forces the player to
+// settle up rather than reload indefinitely.
+const MaxRebuysPerSession = 1
+
 // Rebuy adds chips to a player's stack. Only allowed when no hand is in
 // progress (engine nil OR HandComplete) — preventing mid-hand bankroll injection.
 func (r *Room) Rebuy(userID string, amount int) error {
@@ -495,6 +501,9 @@ func (r *Room) Rebuy(userID string, amount int) error {
 	if !ok {
 		return errors.New("not in room")
 	}
+	if m.RebuyCount >= MaxRebuysPerSession {
+		return errors.New("rebuy limit reached")
+	}
 	if r.engine != nil {
 		stage := r.engine.Stage
 		midHand := stage != game.StageWaiting && stage != game.StageHandComplete
@@ -504,6 +513,7 @@ func (r *Room) Rebuy(userID string, amount int) error {
 	}
 	m.BuyIn += amount
 	m.TotalBuyIn += amount
+	m.RebuyCount++
 	return nil
 }
 
@@ -609,6 +619,16 @@ func (r *Room) HumanCount() int {
 		}
 	}
 	return count
+}
+
+// HasPlayer reports whether the given user is currently seated in the room.
+// Used to distinguish a network drop (player still seated, schedule grace)
+// from a post-leave socket close (player already gone, skip grace).
+func (r *Room) HasPlayer(userID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.players[userID]
+	return ok
 }
 
 func nextNonSitOutIdx(players []*game.EnginePlayer, fromIdx int) int {

@@ -10,6 +10,7 @@ import type {
   ErrorPayload,
   GameEndedPayload,
   GameEventPayload,
+  GameStage,
   JoinedPayload,
   Player,
   PlayerAction,
@@ -20,12 +21,18 @@ import type {
   WireRoomState,
 } from '../../types/game';
 
-const OPPONENT_POSITIONS_6: Record<number, { top: string; left: string }> = {
-  1: { top: '70%', left: '90%' },
-  2: { top: '26%', left: '85%' },
-  3: { top: '12%', left: '50%' },
-  4: { top: '26%', left: '15%' },
-  5: { top: '70%', left: '10%' },
+// Opponent slot positions around the oval felt, indexed by posKey =
+// (theirSeat - mySeat + maxSeats) % maxSeats. posKey 0 is "me" and rendered
+// in the bottom me-zone, so only 1..8 appear here (max 9-seat table).
+const OPPONENT_POSITIONS_9: Record<number, { top: string; left: string }> = {
+  1: { top: '78%', left: '88%' },
+  2: { top: '50%', left: '96%' },
+  3: { top: '22%', left: '88%' },
+  4: { top: '8%',  left: '66%' },
+  5: { top: '6%',  left: '50%' },
+  6: { top: '8%',  left: '34%' },
+  7: { top: '22%', left: '12%' },
+  8: { top: '50%', left: '4%' },
 };
 
 interface MyCardView {
@@ -36,7 +43,7 @@ interface MyCardView {
 }
 
 interface OpponentView extends Player {
-  posKey: number; // 1..5, relative to my seat clockwise
+  posKey: number; // 1..8, relative to my seat clockwise (9-seat table)
 }
 
 interface ShowdownContestant {
@@ -66,6 +73,17 @@ interface ChatBubble {
   left: string;
   emoji: string;
 }
+
+interface DealCardAnim {
+  id: number;
+  isMe: boolean;
+  toTop: string;   // unused when isMe, but provided for uniform style binding
+  toLeft: string;
+  delay: number;   // ms, drives sequential fan-out
+}
+
+const DEAL_STAGGER_MS = 120;
+const DEAL_CARD_ANIM_MS = 450;
 
 const QUICK_EMOJIS = ['👍', '👏', '😂', '😱', '🤔', '🔥', '💪', '🃏'];
 
@@ -99,11 +117,19 @@ interface PageData {
 
   // Animations
   isDealing: boolean;            // hole card deal animation playing
+  dealCards: DealCardAnim[];     // pre-computed sequential deal placements
   newCommunityIndices: number[]; // indices of community cards just revealed (for flip-in)
   chipFlies: ChipFly[];          // active chip-to-pot animations
   chatBubbles: ChatBubble[];     // active floating chat bubbles
   chatPickerOpen: boolean;
   quickEmojis: string[];
+
+  // True while a hand is being dealt/played — gates the face-down hole-card
+  // backs shown in front of each opponent so they hide between hands.
+  handInProgress: boolean;
+
+  // My hole cards default to face-down each hand; tap to peek.
+  myCardsRevealed: boolean;
 }
 
 interface PageMethods {
@@ -117,6 +143,7 @@ interface PageMethods {
   onPickEmoji(e: WechatMiniprogram.TouchEvent): void;
   onChatBackdropTap(): void;
   onSettlementBackToLobby(): void;
+  onToggleMyCards(): void;
   openSettlement(players: PlayerSettlement[]): void;
   shareRoom(): void;
   onShareAppMessage(): WechatMiniprogram.Page.ICustomShareContent;
@@ -136,6 +163,10 @@ let chipFlyIdSeq = 0;
 let chatBubbleIdSeq = 0;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let pageJoinPassword = '';
+// True only when the user picked "离开房间" from the settings menu. The plain
+// back navigation (system gesture / hardware back) keeps this false so the
+// server's soft-leave grace can preserve the seat + chips for a quick re-entry.
+let intentionalLeave = false;
 
 function formatRemaining(ms: number): string {
   if (ms <= 0) return '00:00';
@@ -153,7 +184,7 @@ Page<PageData, PageMethods>({
     opponents: [],
     myPlayer: null,
     myCardsView: [],
-    opponentPositions: OPPONENT_POSITIONS_6,
+    opponentPositions: OPPONENT_POSITIONS_9,
     isMyTurn: false,
     callAmount: 0,
     canCheck: false,
@@ -173,11 +204,14 @@ Page<PageData, PageMethods>({
     settlementPlayers: [],
 
     isDealing: false,
+    dealCards: [],
     newCommunityIndices: [],
     chipFlies: [],
     chatBubbles: [],
     chatPickerOpen: false,
     quickEmojis: QUICK_EMOJIS,
+    handInProgress: false,
+    myCardsRevealed: false,
   },
 
   onLoad(options) {
@@ -193,6 +227,7 @@ Page<PageData, PageMethods>({
     const roomId = (options?.roomId as string) || '1234';
     const buyIn = Number(options?.buyIn ?? 1000);
     pageJoinPassword = String(options?.password ?? '');
+    intentionalLeave = false;
 
     const offState = gameSocket.on<WireRoomState>('room-state', (msg) => {
       if (!msg.data) return;
@@ -313,7 +348,14 @@ Page<PageData, PageMethods>({
       countdownTimer = null;
     }
     pageJoinPassword = '';
-    if (gameSocket.isConnected()) gameSocket.send('leave', { roomId: this.data.table?.roomId });
+    // Only emit a hard leave when the user picked "离开房间" from the menu.
+    // System back / swipe-back drops through to just closing the socket — the
+    // server's disconnect grace preserves the seat for ~60s so a quick
+    // re-entry keeps the same chip stack instead of resetting to fresh BuyIn.
+    if (intentionalLeave && gameSocket.isConnected()) {
+      gameSocket.send('leave', { roomId: this.data.table?.roomId });
+    }
+    intentionalLeave = false;
     gameSocket.close();
   },
 
@@ -336,24 +378,56 @@ Page<PageData, PageMethods>({
     const callAmount = me ? Math.max(0, table.currentBet - me.betThisRound) : 0;
     const myCardsView = me ? me.holeCards.map(toCardView) : [];
 
-    // Detect new community cards revealed and trigger flip-in for those indices
+    // Detect new community cards revealed and trigger flip-in for those indices.
+    // Cards reveal one-by-one with a 220ms stagger inside the component, so the
+    // cleanup needs to outlast (n-1)*220ms + 550ms animation.
     const prevRevealed = prev?.revealedCount ?? 0;
     const nowRevealed = table.revealedCount;
     let newIdx: number[] = [];
     if (nowRevealed > prevRevealed) {
       for (let i = prevRevealed; i < nowRevealed; i++) newIdx.push(i);
-      // clear flag after animation length
+      const FLIP_STAGGER_MS = 220;
+      const cleanupMs = (newIdx.length - 1) * FLIP_STAGGER_MS + 700;
       setTimeout(() => {
         this.setData({ newCommunityIndices: [] });
-      }, 700);
+      }, cleanupMs);
+      // Stagger the deal sound to match the visual flips
+      newIdx.forEach((_, order) => {
+        if (order === 0) sfx.play('deal');
+        else setTimeout(() => sfx.play('deal'), order * FLIP_STAGGER_MS);
+      });
     }
 
     // Detect a fresh hand starting (preflop with hole cards we didn't have before)
     const wasIdle = !prev || prev.stage === 'waiting' || prev.stage === 'hand-complete';
     const enteringPreflop = table.stage === 'preflop';
     if (wasIdle && enteringPreflop) {
-      this.setData({ isDealing: true });
-      setTimeout(() => this.setData({ isDealing: false }), 900);
+      // Build sequential deal-card placements: first card to each opponent in
+      // posKey order (clockwise from me), then to me; then a second pass for
+      // the second card. Cards animate from felt centre with a per-card stagger.
+      const orderedSeats: Array<{ isMe: boolean; top: string; left: string }> = [];
+      const opponentsByPos = [...opponents].sort((a, b) => a.posKey - b.posKey);
+      for (const op of opponentsByPos) {
+        const pos = OPPONENT_POSITIONS_9[op.posKey];
+        if (pos) orderedSeats.push({ isMe: false, top: pos.top, left: pos.left });
+      }
+      orderedSeats.push({ isMe: true, top: '110%', left: '50%' });
+      const dealCards: DealCardAnim[] = [];
+      let id = 0;
+      for (let round = 0; round < 2; round++) {
+        orderedSeats.forEach((s, i) => {
+          dealCards.push({
+            id: id++,
+            isMe: s.isMe,
+            toTop: s.top,
+            toLeft: s.left,
+            delay: (round * orderedSeats.length + i) * DEAL_STAGGER_MS,
+          });
+        });
+      }
+      const dealTotalMs = (dealCards.length - 1) * DEAL_STAGGER_MS + DEAL_CARD_ANIM_MS + 100;
+      this.setData({ isDealing: true, dealCards, myCardsRevealed: false });
+      setTimeout(() => this.setData({ isDealing: false, dealCards: [] }), dealTotalMs);
       // Dismiss any lingering showdown panel from the previous hand
       if (this.data.showdownVisible) {
         this.setData({
@@ -373,6 +447,8 @@ Page<PageData, PageMethods>({
       endingHint = '时间到，本手打完后结算';
     }
     const isMyTurnFinal = !table.ended && isMyTurn;
+    const HAND_ACTIVE_STAGES: GameStage[] = ['preflop', 'flop', 'turn', 'river', 'showdown'];
+    const handInProgress = HAND_ACTIVE_STAGES.indexOf(table.stage) >= 0;
 
     this.setData({
       table,
@@ -385,6 +461,7 @@ Page<PageData, PageMethods>({
       banner: '',
       endingHint,
       newCommunityIndices: newIdx.length ? newIdx : this.data.newCommunityIndices,
+      handInProgress,
     });
   },
 
@@ -406,6 +483,7 @@ Page<PageData, PageMethods>({
   },
 
   onSettlementBackToLobby() {
+    intentionalLeave = true;
     wx.navigateBack({ delta: 1, fail: () => wx.switchTab({ url: '/pages/lobby/lobby' }) });
   },
 
@@ -428,9 +506,13 @@ Page<PageData, PageMethods>({
         }
         break;
       }
-      case 'hole-dealt':
-      case 'community-dealt': {
+      case 'hole-dealt': {
         sfx.play('deal');
+        break;
+      }
+      case 'community-dealt': {
+        // Deal sounds for community cards are played staggered from
+        // applyWireState so they line up with the per-card flip animation.
         break;
       }
       case 'showdown': {
@@ -526,7 +608,7 @@ Page<PageData, PageMethods>({
     let toLeft = '50%';
     if (!isMe) {
       const posKey = (seatNumber - me.seat + this.data.table.maxSeats) % this.data.table.maxSeats;
-      const pos = OPPONENT_POSITIONS_6[posKey];
+      const pos = OPPONENT_POSITIONS_9[posKey];
       if (pos) {
         toTop = pos.top;
         toLeft = pos.left;
@@ -561,7 +643,7 @@ Page<PageData, PageMethods>({
       fromLeft = '50%';
     } else {
       const posKey = (seatNumber - me.seat + this.data.table.maxSeats) % this.data.table.maxSeats;
-      const pos = OPPONENT_POSITIONS_6[posKey];
+      const pos = OPPONENT_POSITIONS_9[posKey];
       if (pos) {
         fromTop = pos.top;
         fromLeft = pos.left;
@@ -601,7 +683,7 @@ Page<PageData, PageMethods>({
       left = '50%';
     } else if (me) {
       const posKey = (payload.seat - me.seat + tbl.maxSeats) % tbl.maxSeats;
-      const pos = OPPONENT_POSITIONS_6[posKey];
+      const pos = OPPONENT_POSITIONS_9[posKey];
       if (pos) {
         top = pos.top;
         left = pos.left;
@@ -623,6 +705,11 @@ Page<PageData, PageMethods>({
 
   onChatBackdropTap() {
     this.setData({ chatPickerOpen: false });
+  },
+
+  onToggleMyCards() {
+    if (this.data.myCardsView.length === 0) return;
+    this.setData({ myCardsRevealed: !this.data.myCardsRevealed });
   },
 
   onPickEmoji(e) {
@@ -658,6 +745,7 @@ Page<PageData, PageMethods>({
   },
 
   onLeave() {
+    intentionalLeave = true;
     wx.navigateBack({ delta: 1 });
   },
 

@@ -184,6 +184,32 @@
   gap: 16rpx;
   margin-top: -64rpx; /* 让手牌探出 me-zone 顶部，更立体 */
   margin-bottom: 4rpx;
+  position: relative;
+}
+
+.me-cards.is-revealed .me-cards-hint { display: none; }
+
+.me-cards-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #FFF6E0;
+  background: rgba(20, 12, 40, 0.78);
+  border: 2rpx solid rgba(255, 214, 107, 0.5);
+  padding: 6rpx 16rpx;
+  border-radius: 18rpx;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+  animation: hint-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes hint-pulse {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1; }
 }
 
 .me-card-tilt {
@@ -264,6 +290,7 @@
 .me-badge-d { background: #FFD66B; color: #4A2E00; }
 .me-badge-sb { background: #6BB6FF; color: #fff; }
 .me-badge-bb { background: #FF6B7A; color: #fff; }
+.me-badge-utg { background: #B879FF; color: #fff; }
 
 .me-meta {
   flex: 1;
@@ -314,11 +341,24 @@
   box-shadow: 0 1rpx 0 #E0A744;
 }
 
+.rebuy-btn-disabled {
+  background: rgba(255, 246, 224, 0.18);
+  color: rgba(255, 246, 224, 0.6);
+  box-shadow: none;
+}
+.rebuy-btn-disabled:active {
+  transform: none;
+  box-shadow: none;
+}
+
 /* ========================================
    动画层
    ======================================== */
 
-/* 发牌动画：单张牌从桌中飞向座位 */
+/* 发牌动画：单张牌从桌中飞向座位。
+   每张牌通过 inline animation-delay 错峰发出（依次发牌效果）；
+   animation-fill-mode: both 让延迟期间保持 0% 状态（隐形居中），
+   动画结束后保留 100% 状态（已淡出）。 */
 .deal-card {
   position: absolute;
   width: 60rpx;
@@ -339,28 +379,22 @@
 }
 
 .deal-card.deal-to-me {
-  animation: deal-to-me 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-.deal-card.deal-to-me.delay-1 {
-  animation-delay: 0.12s;
+  animation: deal-to-me 0.45s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 @keyframes deal-to-me {
   0%   { top: 50%; left: 50%; opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
-  10%  { opacity: 1; }
+  15%  { opacity: 1; }
   100% { top: 110%; left: 50%; opacity: 0; transform: translate(-50%, -50%) scale(1); }
 }
 
 .deal-card.deal-to-pos {
-  animation: deal-to-pos 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-.deal-card.deal-to-pos.delay-1 {
-  animation-delay: 0.12s;
+  animation: deal-to-pos 0.45s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 @keyframes deal-to-pos {
   0%   { top: 50%; left: 50%; opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
-  10%  { opacity: 1; }
+  15%  { opacity: 1; }
   100% { top: var(--target-top); left: var(--target-left); opacity: 0; transform: translate(-50%, -50%) scale(1); }
 }
 

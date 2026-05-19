@@ -709,3 +709,39 @@ func TestRoomNotDeletedWhileSecondHumanRemains(t *testing.T) {
 		t.Fatalf("room del4 should remain while bob is seated")
 	}
 }
+
+// Regression: when both players send CMsgLeave then drop their conns (the
+// normal client flow on page-back), the room must be deleted immediately
+// after the last leave — not stall for the full disconnect grace window
+// because of a stale soft-leave timer scheduled after the leave.
+func TestRoomDeletedImmediatelyWhenAllPlayersLeaveConcurrently(t *testing.T) {
+	hub := NewHub(RoomConfig{SmallBlind: 50, BigBlind: 100, MaxSeats: 6, MinPlayers: 2})
+	hub.SetDisconnectGrace(10 * time.Second) // long enough that grace can't possibly save the test
+	hub.SetAutoStartDelay(time.Hour)
+	server := httptest.NewServer(HTTPHandler(hub))
+	defer server.Close()
+
+	a := dialClient(t, server)
+	b := dialClient(t, server)
+	sendClient(t, a, CMsgJoin, JoinPayload{
+		RoomID: "del5", UserID: "alice", Nickname: "Alice", Avatar: "🐱", BuyIn: 1000,
+	})
+	readUntil(t, a, time.Second, func(m ServerMessage) bool { return m.Type == SMsgJoined })
+	sendClient(t, b, CMsgJoin, JoinPayload{
+		RoomID: "del5", UserID: "bob", Nickname: "Bob", Avatar: "🐶", BuyIn: 1000,
+	})
+	readUntil(t, b, time.Second, func(m ServerMessage) bool { return m.Type == SMsgJoined })
+
+	// Mirror the client onUnload sequence: leave message then conn close.
+	sendClient(t, a, CMsgLeave, nil)
+	a.Close()
+	sendClient(t, b, CMsgLeave, nil)
+	b.Close()
+
+	// Give the hub a tick to process everything. We're well under the 10s
+	// grace, so if the room is still here it's because the bug regressed.
+	time.Sleep(200 * time.Millisecond)
+	if hub.GetRoom("del5") != nil {
+		t.Fatalf("room del5 should be deleted as soon as the last human leaves, not stall for disconnect grace")
+	}
+}
