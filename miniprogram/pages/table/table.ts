@@ -1,7 +1,7 @@
 import { store } from '../../utils/store';
 import { gameSocket, DEFAULT_WS_URL } from '../../utils/socket';
 import { wireToTable } from '../../utils/wire-adapter';
-import { SUIT_SYMBOL, SUIT_COLOR } from '../../utils/cards';
+import { SUIT_SYMBOL, SUIT_COLOR, handRankLabel } from '../../utils/cards';
 import { ensureLoggedIn } from '../../utils/auth';
 import * as sfx from '../../utils/sfx';
 import type {
@@ -44,6 +44,7 @@ interface MyCardView {
 
 interface OpponentView extends Player {
   posKey: number; // 1..8, relative to my seat clockwise (9-seat table)
+  handRank: string; // Chinese label of evaluated hand at showdown; '' otherwise
 }
 
 interface ChipFly {
@@ -121,6 +122,9 @@ interface PageData {
 
   // My hole cards default to face-down each hand; tap to peek.
   myCardsRevealed: boolean;
+
+  // My evaluated hand-rank label at showdown (e.g. "葫芦"); '' otherwise.
+  myHandRank: string;
 }
 
 interface PageMethods {
@@ -153,6 +157,10 @@ let chipFlyIdSeq = 0;
 let chatBubbleIdSeq = 0;
 let winBubbleIdSeq = 0;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
+// Showdown hand-rank cache per uid for the current hand. The wire room-state
+// only carries hole cards, not the evaluated rank, so we stash whatever the
+// `showdown` game-event delivers and clear it at the start of the next hand.
+let handRanksByUid: Record<string, string> = {};
 let pageJoinPassword = '';
 // True only when the user picked "离开房间" from the settings menu. The plain
 // back navigation (system gesture / hardware back) keeps this false so the
@@ -198,6 +206,7 @@ Page<PageData, PageMethods>({
     quickEmojis: QUICK_EMOJIS,
     handInProgress: false,
     myCardsRevealed: false,
+    myHandRank: '',
   },
 
   onLoad(options) {
@@ -359,7 +368,9 @@ Page<PageData, PageMethods>({
       .map((p) => ({
         ...p,
         posKey: ((p.seat - mySeat + table.maxSeats) % table.maxSeats),
+        handRank: handRankLabel(handRanksByUid[p.uid]),
       }));
+    const myHandRank = me ? handRankLabel(handRanksByUid[me.uid]) : '';
     const isMyTurn = !!me && table.activeSeat === me.seat;
     const callAmount = me ? Math.max(0, table.currentBet - me.betThisRound) : 0;
     const myCardsView = me ? me.holeCards.map(toCardView) : [];
@@ -387,7 +398,28 @@ Page<PageData, PageMethods>({
     // Detect a fresh hand starting (preflop with hole cards we didn't have before)
     const wasIdle = !prev || prev.stage === 'waiting' || prev.stage === 'hand-complete';
     const enteringPreflop = table.stage === 'preflop';
+
+    // Clear lingering per-hand animations (win bubbles, chip flies) whenever
+    // we leave a resolving stage. Without this the previous hand's "+N" float
+    // can bleed into the next hand if the server auto-restarts inside its
+    // 1.9s lifetime.
+    const prevResolving = !!prev && (prev.stage === 'showdown' || prev.stage === 'hand-complete');
+    const nowResolving = table.stage === 'showdown' || table.stage === 'hand-complete';
+    if (prevResolving && !nowResolving) {
+      if (this.data.winBubbles.length > 0 || this.data.chipFlies.length > 0) {
+        this.setData({ winBubbles: [], chipFlies: [] });
+      }
+    }
+    // Entering a resolving stage — auto-reveal my own hole cards so I don't
+    // have to tap during showdown (and so the UI is consistent with opponents
+    // who get their cards revealed on their seats).
+    if (!prevResolving && nowResolving && !this.data.myCardsRevealed && myCardsView.length > 0) {
+      this.setData({ myCardsRevealed: true });
+    }
+
     if (wasIdle && enteringPreflop) {
+      // New hand starting — discard any cached hand-rank labels from last hand.
+      handRanksByUid = {};
       // Build sequential deal-card placements: first card to each opponent in
       // posKey order (clockwise from me), then to me; then a second pass for
       // the second card. Cards animate from felt centre with a per-card stagger.
@@ -438,6 +470,7 @@ Page<PageData, PageMethods>({
       endingHint,
       newCommunityIndices: newIdx.length ? newIdx : this.data.newCommunityIndices,
       handInProgress,
+      myHandRank,
     });
   },
 
@@ -487,7 +520,20 @@ Page<PageData, PageMethods>({
       }
       case 'showdown': {
         const shares = (payload.data?.shares as Array<{ playerId: string; amount: number }>) || [];
-        this.flyPotToWinners(shares);
+        const netByUid = (payload.data?.net as Record<string, number>) || {};
+        const hands = (payload.data?.hands as Array<{ playerId: string; rank: string }>) || [];
+        // Cache per-uid hand rank so the UI can label each showdown player.
+        // This is cleared at the start of the next hand.
+        for (const h of hands) {
+          if (h && h.playerId && h.rank) handRanksByUid[h.playerId] = h.rank;
+        }
+        // Re-derive my own rank label immediately so the me-zone updates
+        // without waiting for the next room-state.
+        const me = this.data.myPlayer;
+        if (me && handRanksByUid[me.uid]) {
+          this.setData({ myHandRank: handRankLabel(handRanksByUid[me.uid]) });
+        }
+        this.flyPotToWinners(shares, netByUid);
         sfx.play('win');
         break;
       }
@@ -495,9 +541,10 @@ Page<PageData, PageMethods>({
         if (payload.data?.uncontested) {
           const winnerSeat = payload.data?.winner as number | undefined;
           const amount = (payload.data?.amount as number) ?? 0;
+          const net = (payload.data?.net as number) ?? amount;
           if (typeof winnerSeat === 'number') {
             this.flyPotToSeat(winnerSeat, amount);
-            this.spawnWinBubble(winnerSeat, amount);
+            this.spawnWinBubble(winnerSeat, net);
           }
         }
         break;
@@ -505,10 +552,13 @@ Page<PageData, PageMethods>({
     }
   },
 
-  flyPotToWinners(shares: Array<{ playerId: string; amount: number }>) {
+  flyPotToWinners(
+    shares: Array<{ playerId: string; amount: number }>,
+    netByUid: Record<string, number>,
+  ) {
     const tbl = this.data.table;
     if (!tbl) return;
-    // Aggregate amounts per uid
+    // Aggregate gross winnings per uid (drives chip-fly + on-chip number).
     const totalByUid: Record<string, number> = {};
     for (const s of shares) {
       totalByUid[s.playerId] = (totalByUid[s.playerId] || 0) + s.amount;
@@ -518,7 +568,9 @@ Page<PageData, PageMethods>({
       const player = tbl.players.find((p) => p.uid === uid);
       if (!player) continue;
       this.flyPotToSeat(player.seat, amount);
-      this.spawnWinBubble(player.seat, amount);
+      // +N float uses net profit (gross - what they put in this hand).
+      const net = netByUid[uid] ?? amount;
+      this.spawnWinBubble(player.seat, net);
     }
   },
 

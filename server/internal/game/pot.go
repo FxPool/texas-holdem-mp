@@ -16,10 +16,10 @@ type PotContribution struct {
 // PotShare is one award entry. A single player may receive multiple shares
 // (one per side pot they win); aggregate by PlayerID at the call site if needed.
 type PotShare struct {
-	PlayerID string
-	Amount   int
+	PlayerID string `json:"playerId"`
+	Amount   int    `json:"amount"`
 	// PotIndex is which side pot this share comes from (0 = main, 1+ = side pots).
-	PotIndex int
+	PotIndex int `json:"potIndex"`
 }
 
 // DistributePots builds tiered pots from contributions and returns the awards.

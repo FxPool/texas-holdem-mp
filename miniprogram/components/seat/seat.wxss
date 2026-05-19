@@ -24,6 +24,12 @@
   pointer-events: none;
 }
 
+/* 摊牌时显示正面：抬到头像上方，z-index 高于头像 */
+.holecards.is-revealed {
+  top: -110rpx;
+  z-index: 7;
+}
+
 .hc {
   display: inline-block;
 }
@@ -34,6 +40,33 @@
 
 .hc-2 {
   transform: translateX(-16rpx) rotate(12deg);
+}
+
+/* 摊牌时正面状态下让两张牌更分开、更立体 */
+.holecards.is-revealed .hc-1 {
+  transform: translateX(8rpx) rotate(-8deg);
+  filter: drop-shadow(0 4rpx 8rpx rgba(0,0,0,0.45));
+}
+.holecards.is-revealed .hc-2 {
+  transform: translateX(-8rpx) rotate(8deg);
+  filter: drop-shadow(0 4rpx 8rpx rgba(0,0,0,0.45));
+}
+
+/* 中文牌型标签：贴在两张牌中间下方 */
+.hand-rank-tag {
+  position: absolute;
+  left: 50%;
+  bottom: -22rpx;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #FFD66B 0%, #FFA94D 100%);
+  color: #4A2E00;
+  font-size: 20rpx;
+  font-weight: 800;
+  padding: 2rpx 12rpx;
+  border-radius: 14rpx;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+  letter-spacing: 1rpx;
 }
 
 .avatar-wrap {

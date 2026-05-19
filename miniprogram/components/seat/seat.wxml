@@ -1,8 +1,18 @@
 <view class="seat status-{{player.status}} {{isActive ? 'is-active' : ''}}" wx:if="{{player}}">
-  <!-- 对手手牌（背面），扇形夹在头像后方。只在本手进行中显示。 -->
-  <view class="holecards" wx:if="{{hasHand && player.status !== 'folded' && player.status !== 'sit-out'}}">
-    <view class="hc hc-1"><p-card size="sm" revealed="{{false}}" /></view>
-    <view class="hc hc-2"><p-card size="sm" revealed="{{false}}" /></view>
+  <!-- 对手手牌：本手进行中显示牌背；进入摊牌阶段后服务端会下发 holeCards，露出正面 -->
+  <view
+    class="holecards {{player.holeCards && player.holeCards.length === 2 ? 'is-revealed' : ''}}"
+    wx:if="{{(hasHand || (player.holeCards && player.holeCards.length === 2)) && player.status !== 'folded' && player.status !== 'sit-out'}}"
+  >
+    <block wx:if="{{player.holeCards && player.holeCards.length === 2}}">
+      <view class="hc hc-1"><p-card size="sm" revealed="{{true}}" suit="{{player.holeCards[0].suit}}" rank="{{player.holeCards[0].rank}}" /></view>
+      <view class="hc hc-2"><p-card size="sm" revealed="{{true}}" suit="{{player.holeCards[1].suit}}" rank="{{player.holeCards[1].rank}}" /></view>
+      <view wx:if="{{handRank}}" class="hand-rank-tag">{{handRank}}</view>
+    </block>
+    <block wx:else>
+      <view class="hc hc-1"><p-card size="sm" revealed="{{false}}" /></view>
+      <view class="hc hc-2"><p-card size="sm" revealed="{{false}}" /></view>
+    </block>
   </view>
 
   <!-- 头像 -->

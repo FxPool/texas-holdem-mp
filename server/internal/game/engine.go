@@ -499,8 +499,13 @@ func (e *Engine) endHandUncontested() ([]Event, error) {
 	winner.Chips += awarded
 	e.Pot = 0
 	e.Stage = StageHandComplete
+	// Net profit = pot total minus the winner's own contribution to that pot.
+	netProfit := awarded - winner.Committed
+	if netProfit < 0 {
+		netProfit = 0
+	}
 	return []Event{{Type: EventHandComplete, Data: map[string]any{
-		"uncontested": true, "winner": winner.Seat, "amount": awarded,
+		"uncontested": true, "winner": winner.Seat, "amount": awarded, "net": netProfit,
 	}}}, nil
 }
 
@@ -547,6 +552,17 @@ func (e *Engine) runShowdown() ([]Event, error) {
 			}
 		}
 	}
+	// Per-player net profit this hand: gross winnings (sum of shares) minus
+	// what they themselves committed to the pot. Negative for losers; clients
+	// only display this for winners (net > 0).
+	sumShares := make(map[string]int, len(contribs))
+	for _, s := range shares {
+		sumShares[s.PlayerID] += s.Amount
+	}
+	netByPlayer := make(map[string]int, len(contribs))
+	for _, c := range contribs {
+		netByPlayer[c.PlayerID] = sumShares[c.PlayerID] - c.Committed
+	}
 	e.Pot = 0
 	e.Stage = StageHandComplete
 	return []Event{
@@ -554,6 +570,7 @@ func (e *Engine) runShowdown() ([]Event, error) {
 			"community": e.Community,
 			"shares":    shares,
 			"hands":     hands,
+			"net":       netByPlayer,
 		}},
 		{Type: EventHandComplete, Data: map[string]any{"uncontested": false}},
 	}, nil

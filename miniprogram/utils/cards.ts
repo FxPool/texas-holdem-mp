@@ -33,3 +33,21 @@ export function buildDeck(): Card[] {
 export function shufflePlaceholder(deck: Card[]): Card[] {
   return deck.slice();
 }
+
+// 服务端 HandRank.Slug() 与中文牌型显示的对照。未识别的 slug 直接返回原串。
+const HAND_RANK_LABEL: Record<string, string> = {
+  'high-card': '高牌',
+  'one-pair': '对子',
+  'two-pair': '两对',
+  'three-of-a-kind': '三条',
+  'straight': '顺子',
+  'flush': '同花',
+  'full-house': '葫芦',
+  'four-of-a-kind': '四条',
+  'straight-flush': '同花顺',
+};
+
+export function handRankLabel(slug: string | undefined): string {
+  if (!slug) return '';
+  return HAND_RANK_LABEL[slug] ?? slug;
+}

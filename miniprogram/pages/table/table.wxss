@@ -212,6 +212,24 @@
   50%      { opacity: 1; }
 }
 
+/* 摊牌时自己的中文牌型标签，浮在两张牌中间正上方 */
+.me-hand-rank {
+  position: absolute;
+  left: 50%;
+  top: -38rpx;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #FFD66B 0%, #FFA94D 100%);
+  color: #4A2E00;
+  font-size: 26rpx;
+  font-weight: 800;
+  padding: 4rpx 20rpx;
+  border-radius: 18rpx;
+  box-shadow: 0 4rpx 10rpx rgba(0, 0, 0, 0.45);
+  letter-spacing: 2rpx;
+  white-space: nowrap;
+  z-index: 3;
+}
+
 .me-card-tilt {
   display: inline-block;
   filter: drop-shadow(0 6rpx 12rpx rgba(0,0,0,0.4));
