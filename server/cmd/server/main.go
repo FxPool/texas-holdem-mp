@@ -24,6 +24,7 @@ func main() {
 	// Persistence (optional). Set STATE_FILE=/path/to/state.json to enable.
 	// Without it, rooms + stats are in-memory and reset on each restart.
 	statePath := os.Getenv("STATE_FILE")
+
 	store := ws.NewSnapshotStore(statePath)
 	if statePath != "" {
 		if err := hub.AttachStore(store, envDuration("STATE_SAVE_INTERVAL", 30*time.Second)); err != nil {

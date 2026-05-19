@@ -8,9 +8,8 @@
 *.swo
 
 # Build artifacts
+server/bin/
 server/dist/
-server/texas-holdem-server
-server/texas-holdem-server-linux-*
 
 # Secrets — only the example is committed
 deploy/.env

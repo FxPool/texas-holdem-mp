@@ -596,6 +596,21 @@ func (r *Room) PlayerMetas() []*PlayerMeta {
 	return out
 }
 
+// HumanCount returns the number of seated non-bot players, plus any humans
+// currently in their soft-leave grace window (so reconnects don't get
+// stranded). Used by the hub to decide when an empty room can be deleted.
+func (r *Room) HumanCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	count := 0
+	for _, m := range r.players {
+		if !m.IsBot {
+			count++
+		}
+	}
+	return count
+}
+
 func nextNonSitOutIdx(players []*game.EnginePlayer, fromIdx int) int {
 	n := len(players)
 	for i := 1; i <= n; i++ {

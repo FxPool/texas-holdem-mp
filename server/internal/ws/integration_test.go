@@ -513,7 +513,9 @@ func TestSoftLeavePurgeAfterGrace(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 	room := hub.GetRoom("soft2")
 	if room == nil {
-		t.Fatalf("room missing")
+		// Room was the lone-human case: auto-delete cleaned it up after
+		// grace. That's the stronger form of "alice was purged".
+		return
 	}
 	for _, m := range room.PlayerMetas() {
 		if m.UserID == "alice" {
@@ -601,5 +603,109 @@ func TestHTTPHealthEndpoint(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Errorf("status=%d, want 200", resp.StatusCode)
+	}
+}
+
+func TestEmptyRoomAutoDeleteOnExplicitLeave(t *testing.T) {
+	hub := NewHub(RoomConfig{SmallBlind: 50, BigBlind: 100, MaxSeats: 6, MinPlayers: 2})
+	hub.SetAutoStartDelay(time.Hour)
+	server := httptest.NewServer(HTTPHandler(hub))
+	defer server.Close()
+
+	a := dialClient(t, server)
+	defer a.Close()
+	sendClient(t, a, CMsgJoin, JoinPayload{
+		RoomID: "del1", UserID: "alice", Nickname: "Alice", Avatar: "🐱", BuyIn: 1000,
+	})
+	readUntil(t, a, time.Second, func(m ServerMessage) bool { return m.Type == SMsgJoined })
+
+	sendClient(t, a, CMsgLeave, nil)
+	// Give the hub a tick to process the leave + delete.
+	time.Sleep(100 * time.Millisecond)
+	if room := hub.GetRoom("del1"); room != nil {
+		t.Fatalf("room del1 should be auto-deleted after last human left, got %+v", room.PlayerMetas())
+	}
+}
+
+func TestEmptyRoomAutoDeleteOnDisconnect(t *testing.T) {
+	hub := NewHub(RoomConfig{SmallBlind: 50, BigBlind: 100, MaxSeats: 6, MinPlayers: 2})
+	hub.SetDisconnectGrace(150 * time.Millisecond)
+	hub.SetAutoStartDelay(time.Hour)
+	server := httptest.NewServer(HTTPHandler(hub))
+	defer server.Close()
+
+	a := dialClient(t, server)
+	sendClient(t, a, CMsgJoin, JoinPayload{
+		RoomID: "del2", UserID: "alice", Nickname: "Alice", Avatar: "🐱", BuyIn: 1000,
+	})
+	readUntil(t, a, time.Second, func(m ServerMessage) bool { return m.Type == SMsgJoined })
+	a.Close()
+
+	// Mid-grace: room must still exist (alice may reconnect).
+	time.Sleep(50 * time.Millisecond)
+	if room := hub.GetRoom("del2"); room == nil {
+		t.Fatalf("room del2 should still exist during grace window")
+	}
+
+	// After grace: alice is purged → room is empty → auto-deleted.
+	time.Sleep(250 * time.Millisecond)
+	if room := hub.GetRoom("del2"); room != nil {
+		t.Fatalf("room del2 should be auto-deleted after grace, got %+v", room.PlayerMetas())
+	}
+}
+
+func TestBotOnlyRoomDeletedWhenLastHumanLeaves(t *testing.T) {
+	hub := NewHub(RoomConfig{SmallBlind: 50, BigBlind: 100, MaxSeats: 6, MinPlayers: 2})
+	hub.SetAutoStartDelay(time.Hour)
+	server := httptest.NewServer(HTTPHandler(hub))
+	defer server.Close()
+
+	room, err := hub.CreateRoom("del3", RoomConfig{SmallBlind: 50, BigBlind: 100, MaxSeats: 6, MinPlayers: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := NewBotMeta()
+	bot.BuyIn = 1000
+	if _, err := room.AddBot(bot); err != nil {
+		t.Fatal(err)
+	}
+
+	a := dialClient(t, server)
+	defer a.Close()
+	sendClient(t, a, CMsgJoin, JoinPayload{
+		RoomID: "del3", UserID: "alice", Nickname: "Alice", Avatar: "🐱", BuyIn: 1000,
+	})
+	readUntil(t, a, 2*time.Second, func(m ServerMessage) bool { return m.Type == SMsgJoined })
+
+	sendClient(t, a, CMsgLeave, nil)
+	time.Sleep(150 * time.Millisecond)
+	if got := hub.GetRoom("del3"); got != nil {
+		t.Fatalf("room del3 should be deleted when only bots remain, got %d players", len(got.PlayerMetas()))
+	}
+}
+
+func TestRoomNotDeletedWhileSecondHumanRemains(t *testing.T) {
+	hub := NewHub(RoomConfig{SmallBlind: 50, BigBlind: 100, MaxSeats: 6, MinPlayers: 2})
+	hub.SetAutoStartDelay(time.Hour)
+	server := httptest.NewServer(HTTPHandler(hub))
+	defer server.Close()
+
+	a := dialClient(t, server)
+	defer a.Close()
+	b := dialClient(t, server)
+	defer b.Close()
+	sendClient(t, a, CMsgJoin, JoinPayload{
+		RoomID: "del4", UserID: "alice", Nickname: "Alice", Avatar: "🐱", BuyIn: 1000,
+	})
+	readUntil(t, a, time.Second, func(m ServerMessage) bool { return m.Type == SMsgJoined })
+	sendClient(t, b, CMsgJoin, JoinPayload{
+		RoomID: "del4", UserID: "bob", Nickname: "Bob", Avatar: "🐶", BuyIn: 1000,
+	})
+	readUntil(t, b, time.Second, func(m ServerMessage) bool { return m.Type == SMsgJoined })
+
+	sendClient(t, a, CMsgLeave, nil)
+	time.Sleep(100 * time.Millisecond)
+	if hub.GetRoom("del4") == nil {
+		t.Fatalf("room del4 should remain while bob is seated")
 	}
 }

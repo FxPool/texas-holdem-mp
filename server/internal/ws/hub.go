@@ -367,6 +367,7 @@ func (h *Hub) HandleClientMessage(c *Conn, msg ClientMessage) {
 			Type: SMsgPlayerLeft,
 			Data: map[string]any{"userId": uid, "roomId": rid},
 		})
+		h.MaybeDeleteEmptyRoom(rid)
 
 	case CMsgRebuy:
 		if !h.rateAllow(c) {
@@ -526,6 +527,7 @@ func (h *Hub) HandleDisconnect(c *Conn) {
 			Type: SMsgPlayerLeft,
 			Data: map[string]any{"userId": uid, "purged": true},
 		})
+		h.MaybeDeleteEmptyRoom(c.RoomID)
 	})
 }
 
@@ -635,6 +637,60 @@ func (h *Hub) cancelNextHand(roomID string) {
 		t.Stop()
 		delete(h.handTimers, roomID)
 	}
+}
+
+// MaybeDeleteEmptyRoom removes the room from the hub if no humans remain
+// (bots-only rooms count as empty — bots can't sustain a table without a
+// human). Pending soft-leave grace timers keep the room alive so a
+// reconnecting player isn't stranded. Returns true when the room is deleted.
+//
+// Locking: takes h.mu then r.mu (consistent with Join's ordering). Hold the
+// hub lock across the check-and-delete so a concurrent Join can't seat a
+// player into a room we're about to drop.
+func (h *Hub) MaybeDeleteEmptyRoom(roomID string) bool {
+	h.mu.Lock()
+	room, ok := h.rooms[roomID]
+	if !ok {
+		h.mu.Unlock()
+		return false
+	}
+	room.mu.RLock()
+	for _, m := range room.players {
+		if !m.IsBot {
+			room.mu.RUnlock()
+			h.mu.Unlock()
+			return false
+		}
+	}
+	// If any soft-leave timer is pending, a human may still rejoin within
+	// the grace window — keep the room.
+	if len(room.disconnectTimers) > 0 {
+		room.mu.RUnlock()
+		h.mu.Unlock()
+		return false
+	}
+	room.mu.RUnlock()
+	delete(h.rooms, roomID)
+	h.mu.Unlock()
+
+	// Cancel auto-restart and duration timers.
+	h.cancelNextHand(roomID)
+	h.timerMu.Lock()
+	if t := h.endTimers[roomID]; t != nil {
+		t.Stop()
+		delete(h.endTimers, roomID)
+	}
+	h.timerMu.Unlock()
+
+	// Drop bot metas so any lingering references die quickly. Bots have no
+	// Conn, so nothing else to close.
+	room.mu.Lock()
+	room.players = map[string]*PlayerMeta{}
+	room.engine = nil
+	room.mu.Unlock()
+
+	log.Printf("[hub] room %s deleted (no humans remaining)", roomID)
+	return true
 }
 
 func (h *Hub) broadcastEvents(room *Room, events []game.Event) {

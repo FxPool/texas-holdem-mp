@@ -1,6 +1,7 @@
-// HTTP 请求封装。生产环境改成 https + 小程序后台合法域名。
-// HTTP 基址应与 socket.ts 中 DEFAULT_WS_URL 同主机/端口。
-export const DEFAULT_HTTP_URL = 'https://www.zhoudegame.xyz';
+// HTTP 请求封装。生产/内网地址在 ./env.ts 切换。
+import { HTTP_BASE } from './env';
+
+export const DEFAULT_HTTP_URL = HTTP_BASE;
 
 interface RequestOptions<TBody = Record<string, unknown>> {
   url: string;

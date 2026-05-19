@@ -28,6 +28,7 @@ interface RoomItem {
 }
 
 const DEFAULT_DURATION_MINUTES = 30;
+const LOBBY_POLL_INTERVAL_MS = 5000;
 
 const PRESETS: Array<{ name: string; smallBlind: number; bigBlind: number; buyIn: number; maxSeats: number }> = [
   { name: '萌新练手', smallBlind: 20, bigBlind: 50, buyIn: 500, maxSeats: 6 },
@@ -81,26 +82,33 @@ interface PageMethods {
   onChangeName(): void;
   refresh(): Promise<void>;
   onPullDownRefresh(): void;
+  onHide(): void;
+  onUnload(): void;
+  startPolling(): void;
+  stopPolling(): void;
   noop(): void;
 }
 
 function buildRoomItems(server: ServerRoomSummary[]): RoomItem[] {
-  // Always show presets at the top so the lobby has content even when no live
-  // rooms exist yet. If a live room matches a preset's blinds, show that one
-  // instead so live player count surfaces. Skip live rooms that have a
-  // password — those are private and shouldn't be auto-promoted to the
-  // preset slot, since tapping should not route an unrelated user there.
-  const liveByBlinds = new Map<string, ServerRoomSummary>();
+  // Preset slots stay at the top so the lobby has content even when no live
+  // rooms exist. The first public live room with matching blinds gets promoted
+  // into its preset slot to surface its player count; every other live room
+  // (additional same-blind rooms, non-preset blinds, private rooms) is listed
+  // below. Dedup by room id, not by blinds, so multiple rooms with identical
+  // blinds all stay visible.
+  const firstByBlinds = new Map<string, ServerRoomSummary>();
   for (const s of server) {
     if (s.hasPassword) continue;
     if (s.ended) continue;
-    liveByBlinds.set(`${s.smallBlind}/${s.bigBlind}`, s);
+    const key = `${s.smallBlind}/${s.bigBlind}`;
+    if (!firstByBlinds.has(key)) firstByBlinds.set(key, s);
   }
+  const promotedIds = new Set<string>();
   const items: RoomItem[] = PRESETS.map((p) => {
     const key = `${p.smallBlind}/${p.bigBlind}`;
-    const live = liveByBlinds.get(key);
+    const live = firstByBlinds.get(key);
     if (live) {
-      liveByBlinds.delete(key);
+      promotedIds.add(live.id);
       return {
         id: live.id,
         name: p.name,
@@ -127,16 +135,9 @@ function buildRoomItems(server: ServerRoomSummary[]): RoomItem[] {
       ended: false,
     };
   });
-  // Append any other live rooms (including private ones) so users with the
-  // room id can see them in the list. Private rooms render with 🔒.
   for (const s of server) {
     if (s.ended) continue;
-    if (liveByBlinds.has(`${s.smallBlind}/${s.bigBlind}`)) continue;
-    // Already merged into a preset slot above.
-    const matchedPreset = PRESETS.some(
-      (p) => p.smallBlind === s.smallBlind && p.bigBlind === s.bigBlind && !s.hasPassword,
-    );
-    if (matchedPreset) continue;
+    if (promotedIds.has(s.id)) continue;
     items.push({
       id: s.id,
       name: (s.hasPassword ? '🔒 ' : '') + '#' + s.id,
@@ -194,6 +195,33 @@ Page<PageData, PageMethods>({
       });
     }
     this.refresh();
+    this.startPolling();
+  },
+
+  onHide() {
+    this.stopPolling();
+  },
+
+  onUnload() {
+    this.stopPolling();
+  },
+
+  startPolling() {
+    this.stopPolling();
+    const self = this as unknown as { _lobbyTimer?: number };
+    self._lobbyTimer = setInterval(() => {
+      if (this.data.refreshing) return;
+      if (this.data.createOpen || this.data.joinPwOpen) return;
+      this.refresh();
+    }, LOBBY_POLL_INTERVAL_MS) as unknown as number;
+  },
+
+  stopPolling() {
+    const self = this as unknown as { _lobbyTimer?: number };
+    if (self._lobbyTimer) {
+      clearInterval(self._lobbyTimer);
+      self._lobbyTimer = undefined;
+    }
   },
 
   onPullDownRefresh() {

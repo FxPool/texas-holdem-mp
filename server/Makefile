@@ -1,7 +1,7 @@
 # texas-holdem server build automation.
 #
 # Common usage:
-#   make                      # 本地平台编译 → ./texas-holdem-server
+#   make                      # 本地平台编译 → ./bin/texas-holdem-server
 #   make dist                 # 交叉编译 + 打 tar.gz → dist/
 #   make checksums            # SHA256SUMS for dist/
 #   make release VERSION=v0.1.0
@@ -10,6 +10,7 @@
 #   make clean
 
 BIN     := texas-holdem-server
+BIN_DIR := bin
 PKG     := ./cmd/server
 DIST    := dist
 
@@ -17,16 +18,17 @@ GO      ?= go
 LDFLAGS := -s -w
 GOFLAGS := -trimpath
 
-GOSRC := $(shell find . -name '*.go' -not -path './$(DIST)/*' 2>/dev/null)
+GOSRC := $(shell find . -name '*.go' -not -path './$(DIST)/*' -not -path './$(BIN_DIR)/*' 2>/dev/null)
 
 .PHONY: build dist linux-amd64 linux-arm64 archives checksums release test vet tidy clean help
 
 # 默认目标：本地平台开发用编译
-build: $(BIN)
+build: $(BIN_DIR)/$(BIN)
 
-$(BIN): $(GOSRC)
-	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $(BIN) $(PKG)
-	@ls -lh $(BIN)
+$(BIN_DIR)/$(BIN): $(GOSRC)
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $@ $(PKG)
+	@ls -lh $@
 
 # 发布产物：两个 Linux 架构 + 各自打成 tar.gz + SHA256SUMS
 dist: archives checksums
@@ -93,11 +95,11 @@ tidy:
 	$(GO) mod verify
 
 clean:
-	rm -rf $(DIST) $(BIN)
+	rm -rf $(DIST) $(BIN_DIR)
 
 help:
 	@echo "Targets:"
-	@echo "  build         本地平台编译（默认） → ./$(BIN)"
+	@echo "  build         本地平台编译（默认） → ./$(BIN_DIR)/$(BIN)"
 	@echo "  dist          交叉编译 + 打 tar.gz + 校验和 → $(DIST)/"
 	@echo "  linux-amd64   只编 linux/amd64 二进制"
 	@echo "  linux-arm64   只编 linux/arm64 二进制"
@@ -107,7 +109,7 @@ help:
 	@echo "  test          go test ./..."
 	@echo "  vet           go vet + go build"
 	@echo "  tidy          go mod tidy + verify"
-	@echo "  clean         删除 $(DIST)/ 和本地二进制"
+	@echo "  clean         删除 $(DIST)/ 和 $(BIN_DIR)/"
 	@echo ""
 	@echo "示例:"
 	@echo "  make dist                       # 交叉编译两个架构并打包"

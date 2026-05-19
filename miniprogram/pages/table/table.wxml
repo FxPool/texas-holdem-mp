@@ -154,11 +154,9 @@
 
     <view class="action-zone" wx:if="{{myPlayer}}">
       <view class="chat-trigger" catchtap="onToggleChatPicker">😀</view>
-      <view class="wait-slot">
-        <view wx:if="{{table.stage === 'waiting'}}" class="wait-tip">等待更多玩家加入…</view>
-        <view wx:elif="{{table.stage === 'hand-complete'}}" class="wait-tip">本手结束，等待下一手…</view>
-        <view wx:elif="{{!isMyTurn}}" class="wait-tip">等待其他玩家行动…</view>
-      </view>
+      <view wx:if="{{table.stage === 'waiting'}}" class="wait-tip">等待更多玩家加入…</view>
+      <view wx:elif="{{table.stage === 'hand-complete'}}" class="wait-tip">本手结束，等待下一手…</view>
+      <view wx:elif="{{!isMyTurn}}" class="wait-tip">等待其他玩家行动…</view>
       <p-action-bar
         can-check="{{canCheck}}"
         call-amount="{{callAmount}}"

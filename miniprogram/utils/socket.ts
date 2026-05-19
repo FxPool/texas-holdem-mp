@@ -7,6 +7,7 @@ import type {
   ServerMessage,
   ServerMsgType,
 } from '../types/game';
+import { WS_BASE } from './env';
 
 type Listener = (msg: ServerMessage<unknown>) => void;
 
@@ -256,9 +257,5 @@ class GameSocket {
 
 export const gameSocket = new GameSocket();
 
-// 默认开发地址。生产请用 wss:// 并加在小程序后台合法域名列表
-// 端口与 server/cmd/server/main.go 中的 addr 保持一致
-//
-// 模拟器开发用 localhost；真机扫码必须用电脑在 LAN 内的 IP（手机和电脑同 WiFi）
-// 查 LAN IP：mac/Linux `ifconfig | grep "inet "`、Windows `ipconfig`
-export const DEFAULT_WS_URL = 'wss://www.zhoudegame.xyz/ws';
+// 生产/内网地址在 utils/env.ts 切换。
+export const DEFAULT_WS_URL = WS_BASE;
