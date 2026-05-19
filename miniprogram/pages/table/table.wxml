@@ -92,6 +92,11 @@
             <text class="chat-bubble-emoji">{{bubble.emoji}}</text>
           </view>
         </block>
+
+        <!-- 赢家盈利浮动数字 -->
+        <block wx:for="{{winBubbles}}" wx:key="id" wx:for-item="win">
+          <view class="win-bubble" style="top: {{win.top}}; left: {{win.left}};">+{{win.amount}}</view>
+        </block>
       </view>
     </view>
 
@@ -169,16 +174,6 @@
       />
     </view>
   </block>
-
-  <!-- 摊牌面板 -->
-  <p-showdown-panel
-    visible="{{showdownVisible}}"
-    contestants="{{showdownContestants}}"
-    community="{{showdownCommunity}}"
-    uncontested-winner="{{uncontestedWinnerName}}"
-    uncontested-amount="{{uncontestedAmount}}"
-    bind:dismiss="onShowdownDismiss"
-  />
 
   <!-- 终局结算面板 -->
   <view wx:if="{{settlementVisible}}" class="settlement-mask">

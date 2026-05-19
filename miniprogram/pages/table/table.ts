@@ -25,14 +25,14 @@ import type {
 // (theirSeat - mySeat + maxSeats) % maxSeats. posKey 0 is "me" and rendered
 // in the bottom me-zone, so only 1..8 appear here (max 9-seat table).
 const OPPONENT_POSITIONS_9: Record<number, { top: string; left: string }> = {
-  1: { top: '78%', left: '88%' },
-  2: { top: '50%', left: '96%' },
-  3: { top: '22%', left: '88%' },
+  1: { top: '78%', left: '84%' },
+  2: { top: '50%', left: '90%' },
+  3: { top: '22%', left: '84%' },
   4: { top: '8%',  left: '66%' },
   5: { top: '6%',  left: '50%' },
   6: { top: '8%',  left: '34%' },
-  7: { top: '22%', left: '12%' },
-  8: { top: '50%', left: '4%' },
+  7: { top: '22%', left: '16%' },
+  8: { top: '50%', left: '10%' },
 };
 
 interface MyCardView {
@@ -44,17 +44,6 @@ interface MyCardView {
 
 interface OpponentView extends Player {
   posKey: number; // 1..8, relative to my seat clockwise (9-seat table)
-}
-
-interface ShowdownContestant {
-  userId: string;
-  nickname: string;
-  avatar: string;
-  avatarIsUrl: boolean;
-  rankSlug: string;
-  holeCards: Card[];
-  amountWon: number;
-  isWinner: boolean;
 }
 
 interface ChipFly {
@@ -72,6 +61,14 @@ interface ChatBubble {
   top: string;
   left: string;
   emoji: string;
+}
+
+interface WinBubble {
+  id: number;
+  seat: number;
+  top: string;
+  left: string;
+  amount: number;
 }
 
 interface DealCardAnim {
@@ -100,13 +97,6 @@ interface PageData {
   connectionState: 'idle' | 'connecting' | 'connected' | 'disconnected';
   banner: string;
 
-  // Showdown panel
-  showdownVisible: boolean;
-  showdownContestants: ShowdownContestant[];
-  showdownCommunity: Card[];
-  uncontestedWinnerName: string;
-  uncontestedAmount: number;
-
   // Game-duration countdown (only shown when endsAt > 0)
   countdownText: string;
   endingHint: string;
@@ -121,6 +111,7 @@ interface PageData {
   newCommunityIndices: number[]; // indices of community cards just revealed (for flip-in)
   chipFlies: ChipFly[];          // active chip-to-pot animations
   chatBubbles: ChatBubble[];     // active floating chat bubbles
+  winBubbles: WinBubble[];       // active "+N" pot-win floats above winner avatars
   chatPickerOpen: boolean;
   quickEmojis: string[];
 
@@ -137,7 +128,6 @@ interface PageMethods {
   onLeave(): void;
   onSettings(): void;
   onUnload(): void;
-  onShowdownDismiss(): void;
   onRebuy(): void;
   onToggleChatPicker(): void;
   onPickEmoji(e: WechatMiniprogram.TouchEvent): void;
@@ -161,6 +151,7 @@ function toCardView(c: Card): MyCardView {
 let unsubAll: Array<() => void> = [];
 let chipFlyIdSeq = 0;
 let chatBubbleIdSeq = 0;
+let winBubbleIdSeq = 0;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let pageJoinPassword = '';
 // True only when the user picked "离开房间" from the settings menu. The plain
@@ -192,12 +183,6 @@ Page<PageData, PageMethods>({
     connectionState: 'idle',
     banner: '',
 
-    showdownVisible: false,
-    showdownContestants: [],
-    showdownCommunity: [],
-    uncontestedWinnerName: '',
-    uncontestedAmount: 0,
-
     countdownText: '',
     endingHint: '',
     settlementVisible: false,
@@ -208,6 +193,7 @@ Page<PageData, PageMethods>({
     newCommunityIndices: [],
     chipFlies: [],
     chatBubbles: [],
+    winBubbles: [],
     chatPickerOpen: false,
     quickEmojis: QUICK_EMOJIS,
     handInProgress: false,
@@ -428,16 +414,6 @@ Page<PageData, PageMethods>({
       const dealTotalMs = (dealCards.length - 1) * DEAL_STAGGER_MS + DEAL_CARD_ANIM_MS + 100;
       this.setData({ isDealing: true, dealCards, myCardsRevealed: false });
       setTimeout(() => this.setData({ isDealing: false, dealCards: [] }), dealTotalMs);
-      // Dismiss any lingering showdown panel from the previous hand
-      if (this.data.showdownVisible) {
-        this.setData({
-          showdownVisible: false,
-          showdownContestants: [],
-          showdownCommunity: [],
-          uncontestedWinnerName: '',
-          uncontestedAmount: 0,
-        });
-      }
     }
 
     let endingHint = '';
@@ -473,12 +449,6 @@ Page<PageData, PageMethods>({
     this.setData({
       settlementVisible: true,
       settlementPlayers: enriched,
-      // close the per-hand showdown panel so it doesn't double-stack
-      showdownVisible: false,
-      showdownContestants: [],
-      showdownCommunity: [],
-      uncontestedWinnerName: '',
-      uncontestedAmount: 0,
     });
   },
 
@@ -516,72 +486,23 @@ Page<PageData, PageMethods>({
         break;
       }
       case 'showdown': {
-        const community = (payload.data?.community as Card[]) || [];
-        const hands = (payload.data?.hands as Array<{ playerId: string; rank: string; holeCards: Card[] }>) || [];
         const shares = (payload.data?.shares as Array<{ playerId: string; amount: number }>) || [];
         this.flyPotToWinners(shares);
-        this.openShowdown(community, hands, shares);
         sfx.play('win');
         break;
       }
       case 'hand-complete': {
         if (payload.data?.uncontested) {
-          // winnerSeat → look up nickname
           const winnerSeat = payload.data?.winner as number | undefined;
           const amount = (payload.data?.amount as number) ?? 0;
-          const tbl = this.data.table;
-          const winner = tbl?.players.find((p) => p.seat === winnerSeat);
           if (typeof winnerSeat === 'number') {
             this.flyPotToSeat(winnerSeat, amount);
+            this.spawnWinBubble(winnerSeat, amount);
           }
-          this.setData({
-            showdownVisible: true,
-            uncontestedWinnerName: winner?.nickname || '玩家',
-            uncontestedAmount: amount,
-            showdownContestants: [],
-          });
         }
         break;
       }
     }
-  },
-
-  openShowdown(
-    community: Card[],
-    hands: Array<{ playerId: string; rank: string; holeCards: Card[] }>,
-    shares: Array<{ playerId: string; amount: number }>,
-  ) {
-    const tbl = this.data.table;
-    if (!tbl) return;
-    // Aggregate share amounts per player
-    const wonByUid: Record<string, number> = {};
-    for (const s of shares) {
-      wonByUid[s.playerId] = (wonByUid[s.playerId] || 0) + s.amount;
-    }
-    const contestants: ShowdownContestant[] = hands.map((h) => {
-      const player = tbl.players.find((p) => p.uid === h.playerId);
-      const won = wonByUid[h.playerId] || 0;
-      const av = player?.avatar || '🃏';
-      return {
-        userId: h.playerId,
-        nickname: player?.nickname || h.playerId,
-        avatar: av,
-        avatarIsUrl: !!av && (av.indexOf('/') >= 0 || av.indexOf(':') >= 0),
-        rankSlug: h.rank,
-        holeCards: h.holeCards,
-        amountWon: won,
-        isWinner: won > 0,
-      };
-    });
-    // Sort: winners first, then by hand rank descending name (alpha is fine)
-    contestants.sort((a, b) => Number(b.isWinner) - Number(a.isWinner));
-    this.setData({
-      showdownVisible: true,
-      showdownContestants: contestants,
-      showdownCommunity: community,
-      uncontestedWinnerName: '',
-      uncontestedAmount: 0,
-    });
   },
 
   flyPotToWinners(shares: Array<{ playerId: string; amount: number }>) {
@@ -597,6 +518,7 @@ Page<PageData, PageMethods>({
       const player = tbl.players.find((p) => p.uid === uid);
       if (!player) continue;
       this.flyPotToSeat(player.seat, amount);
+      this.spawnWinBubble(player.seat, amount);
     }
   },
 
@@ -667,8 +589,33 @@ Page<PageData, PageMethods>({
     }, 700);
   },
 
-  onShowdownDismiss() {
-    this.setData({ showdownVisible: false });
+  spawnWinBubble(seatNumber: number, amount: number) {
+    const me = this.data.myPlayer;
+    const tbl = this.data.table;
+    if (!tbl || amount <= 0) return;
+    // Anchor at the winner's avatar position (same coords as their seat).
+    let top = '95%';
+    let left = '50%';
+    if (me && seatNumber === me.seat) {
+      // Me-zone sits below the felt; place the bubble just above the me-avatar.
+      top = '100%';
+      left = '50%';
+    } else if (me) {
+      const posKey = (seatNumber - me.seat + tbl.maxSeats) % tbl.maxSeats;
+      const pos = OPPONENT_POSITIONS_9[posKey];
+      if (pos) {
+        top = pos.top;
+        left = pos.left;
+      }
+    }
+    const id = ++winBubbleIdSeq;
+    const bubble: WinBubble = { id, seat: seatNumber, top, left, amount };
+    this.setData({ winBubbles: [...this.data.winBubbles, bubble] });
+    setTimeout(() => {
+      this.setData({
+        winBubbles: this.data.winBubbles.filter((b) => b.id !== id),
+      });
+    }, 1900);
   },
 
   spawnChatBubble(payload: ChatMessagePayload) {

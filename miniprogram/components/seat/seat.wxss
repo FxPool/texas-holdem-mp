@@ -130,13 +130,15 @@
 
 .state-tag {
   position: absolute;
-  top: 36rpx;
-  left: -18rpx;
-  padding: 4rpx 10rpx;
+  top: -18rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2rpx 12rpx;
   border-radius: 12rpx;
-  font-size: 20rpx;
+  font-size: 18rpx;
   font-weight: 700;
   color: #fff;
+  white-space: nowrap;
   z-index: 6;
 }
 

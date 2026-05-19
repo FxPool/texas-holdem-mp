@@ -276,7 +276,7 @@ Page<PageData, PageMethods>({
           maxSeats: preset.maxSeats,
           durationMinutes: duration,
           password: password || undefined,
-          bots: withBots ? 4 : 0,
+          bots: withBots ? 7 : 0,
           botBuyIn: withBots ? preset.buyIn : undefined,
         },
       });

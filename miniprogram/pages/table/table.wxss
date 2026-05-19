@@ -461,6 +461,29 @@
   100% { opacity: 0; transform: translate(-50%, -150%) scale(0.95); }
 }
 
+/* 赢家盈利数字：从座位上方浮出、上飘、淡出 */
+.win-bubble {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 32;
+  font-size: 40rpx;
+  font-weight: 900;
+  color: #5BE5A6;
+  text-shadow:
+    0 2rpx 6rpx rgba(0, 0, 0, 0.6),
+    0 0 12rpx rgba(91, 229, 166, 0.6);
+  animation: win-float 1.8s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+  white-space: nowrap;
+}
+
+@keyframes win-float {
+  0%   { opacity: 0; transform: translate(-50%, 0%)    scale(0.6); }
+  15%  { opacity: 1; transform: translate(-50%, -80%)  scale(1.25); }
+  60%  { opacity: 1; transform: translate(-50%, -160%) scale(1.05); }
+  100% { opacity: 0; transform: translate(-50%, -220%) scale(1); }
+}
+
 /* 表情选择器 */
 .chat-backdrop {
   position: absolute;
