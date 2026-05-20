@@ -1,8 +1,7 @@
-<view class="ring-wrap">
-  <!-- 用 conic-gradient 模拟圆环进度，progress 从 1->0 -->
+<view class="ring-wrap" wx:if="{{totalMs > 0}}">
   <view
-    class="ring"
-    style="background: conic-gradient(#FFD66B {{progress * 360}}deg, rgba(255, 246, 224, 0.15) 0deg);"
+    class="ring ring-anim"
+    style="--total: {{totalMs}}ms; --elapsed: -{{elapsedMs}}ms;"
   ></view>
   <view class="ring-inner"></view>
 </view>

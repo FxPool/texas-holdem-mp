@@ -4,6 +4,7 @@ import { wireToTable } from '../../utils/wire-adapter';
 import { SUIT_SYMBOL, SUIT_COLOR, handRankLabel } from '../../utils/cards';
 import { ensureLoggedIn } from '../../utils/auth';
 import * as sfx from '../../utils/sfx';
+import { translateServerError } from '../../utils/error-i18n';
 import type {
   Card,
   ChatMessagePayload,
@@ -47,13 +48,22 @@ interface OpponentView extends Player {
   handRank: string; // Chinese label of evaluated hand at showdown; '' otherwise
 }
 
+// All overlay floaters carry a `hidden` flag so we can mark them done via a
+// path-syntax setData (single-bool write) instead of cloning + filtering the
+// whole array on each cleanup. The arrays themselves get a one-shot reset at
+// hand-boundary transitions (see applyWireState resolving→non-resolving guard).
+// chip-fly's from/to use px offsets from felt centre so the keyframes can run
+// on transform (compositor) instead of animating top/left (layout+paint).
+// chat/win bubbles keep % anchors because their keyframes already animate
+// transform-only — moving the anchor wouldn't help.
 interface ChipFly {
   id: number;
-  fromTop: string;
-  fromLeft: string;
-  toTop: string;
-  toLeft: string;
+  fromX: number;   // px offset from felt centre
+  fromY: number;
+  toX: number;
+  toY: number;
   amount: number;
+  hidden: boolean;
 }
 
 interface ChatBubble {
@@ -62,6 +72,7 @@ interface ChatBubble {
   top: string;
   left: string;
   emoji: string;
+  hidden: boolean;
 }
 
 interface WinBubble {
@@ -70,18 +81,29 @@ interface WinBubble {
   top: string;
   left: string;
   amount: number;
+  hidden: boolean;
 }
 
 interface DealCardAnim {
   id: number;
   isMe: boolean;
-  toTop: string;   // unused when isMe, but provided for uniform style binding
-  toLeft: string;
+  dx: number;      // px offset from felt centre (0 when isMe — handled by dy only)
+  dy: number;
   delay: number;   // ms, drives sequential fan-out
 }
 
 const DEAL_STAGGER_MS = 120;
 const DEAL_CARD_ANIM_MS = 450;
+
+const STAGE_LABEL: Record<GameStage, string> = {
+  waiting: '等待中',
+  preflop: '翻前',
+  flop: '翻牌',
+  turn: '转牌',
+  river: '河牌',
+  showdown: '摊牌',
+  'hand-complete': '本手结束',
+};
 
 const QUICK_EMOJIS = ['👍', '👏', '😂', '😱', '🤔', '🔥', '💪', '🃏'];
 
@@ -101,6 +123,7 @@ interface PageData {
   // Game-duration countdown (only shown when endsAt > 0)
   countdownText: string;
   endingHint: string;
+  stageLabel: string;
 
   // End-of-game settlement panel
   settlementVisible: boolean;
@@ -132,6 +155,8 @@ interface PageMethods {
   onLeave(): void;
   onSettings(): void;
   onUnload(): void;
+  onReady(): void;
+  onResize(): void;
   onRebuy(): void;
   onToggleChatPicker(): void;
   onPickEmoji(e: WechatMiniprogram.TouchEvent): void;
@@ -141,6 +166,9 @@ interface PageMethods {
   openSettlement(players: PlayerSettlement[]): void;
   shareRoom(): void;
   onShareAppMessage(): WechatMiniprogram.Page.ICustomShareContent;
+  measureFelt(): void;
+  getSeatOffsetPx(posKey: number): { dx: number; dy: number };
+  getMeOffsetPx(): { dx: number; dy: number };
 }
 
 function toCardView(c: Card): MyCardView {
@@ -166,6 +194,30 @@ let pageJoinPassword = '';
 // back navigation (system gesture / hardware back) keeps this false so the
 // server's soft-leave grace can preserve the seat + chips for a quick re-entry.
 let intentionalLeave = false;
+
+// Felt-bounding-box cache so dealCards / chipFlies can use pixel transforms
+// (which composite on GPU) instead of animating `top`/`left` percentages.
+// Populated lazily on first deal via wx.createSelectorQuery; recomputed on
+// orientation/resize via onResize.
+interface FeltGeom {
+  width: number;
+  height: number;
+  // Per-posKey (1..8) pixel offset from felt centre to the seat centre.
+  seatOffsets: Record<number, { dx: number; dy: number }>;
+  // Pixel offset from felt centre to the me-zone anchor (below felt).
+  meOffsetY: number;
+}
+let feltGeom: FeltGeom | null = null;
+
+function shallowCardsEqual(a: Card[] | undefined, b: Card[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return !a === !b;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].suit !== b[i].suit || a[i].rank !== b[i].rank) return false;
+  }
+  return true;
+}
 
 function formatRemaining(ms: number): string {
   if (ms <= 0) return '00:00';
@@ -193,6 +245,7 @@ Page<PageData, PageMethods>({
 
     countdownText: '',
     endingHint: '',
+    stageLabel: '',
     settlementVisible: false,
     settlementPlayers: [],
 
@@ -233,7 +286,7 @@ Page<PageData, PageMethods>({
       this.setData({ banner: '' });
     });
     const offError = gameSocket.on<ErrorPayload>('error', (msg) => {
-      const text = msg.data?.message || msg.data?.code || 'unknown error';
+      const text = translateServerError(msg.data);
       console.warn('[table] server error', msg.data);
       wx.showToast({ title: text, icon: 'none', duration: 2000 });
     });
@@ -343,6 +396,7 @@ Page<PageData, PageMethods>({
       countdownTimer = null;
     }
     pageJoinPassword = '';
+    feltGeom = null;
     // Only emit a hard leave when the user picked "离开房间" from the menu.
     // System back / swipe-back drops through to just closing the socket — the
     // server's disconnect grace preserves the seat for ~60s so a quick
@@ -352,6 +406,21 @@ Page<PageData, PageMethods>({
     }
     intentionalLeave = false;
     gameSocket.close();
+  },
+
+  onReady() {
+    // First-paint measurement of the felt's actual pixel rect. Used by
+    // deal-card / chip-fly animations so target positions can be expressed in
+    // pixel offsets (transform-only animation) instead of % top/left (which
+    // would trigger layout on every frame).
+    this.measureFelt();
+  },
+
+  onResize() {
+    // Orientation/window-size change — re-measure so subsequent animations
+    // use the new geometry.
+    feltGeom = null;
+    this.measureFelt();
   },
 
   applyWireState(wire: WireRoomState) {
@@ -420,16 +489,27 @@ Page<PageData, PageMethods>({
     if (wasIdle && enteringPreflop) {
       // New hand starting — discard any cached hand-rank labels from last hand.
       handRanksByUid = {};
+      // Measure the felt once (no-op if already cached) so deal-card targets
+      // can be expressed in pixel offsets from felt centre, letting the
+      // keyframes animate `transform: translate(...)` on the compositor.
+      if (!feltGeom) this.measureFelt();
       // Build sequential deal-card placements: first card to each opponent in
       // posKey order (clockwise from me), then to me; then a second pass for
       // the second card. Cards animate from felt centre with a per-card stagger.
-      const orderedSeats: Array<{ isMe: boolean; top: string; left: string }> = [];
+      // If feltGeom isn't ready yet (first hand of session), fall back to a
+      // best-effort estimate using window size; subsequent hands hit the cache.
+      const orderedSeats: Array<{ isMe: boolean; dx: number; dy: number }> = [];
       const opponentsByPos = [...opponents].sort((a, b) => a.posKey - b.posKey);
       for (const op of opponentsByPos) {
-        const pos = OPPONENT_POSITIONS_9[op.posKey];
-        if (pos) orderedSeats.push({ isMe: false, top: pos.top, left: pos.left });
+        const off = this.getSeatOffsetPx(op.posKey);
+        orderedSeats.push({ isMe: false, dx: off.dx, dy: off.dy });
       }
-      orderedSeats.push({ isMe: true, top: '110%', left: '50%' });
+      // "Me" anchor: below the felt — use the felt-centre to me-zone delta.
+      orderedSeats.push({
+        isMe: true,
+        dx: 0,
+        dy: feltGeom ? feltGeom.meOffsetY : 240,
+      });
       const dealCards: DealCardAnim[] = [];
       let id = 0;
       for (let round = 0; round < 2; round++) {
@@ -437,8 +517,8 @@ Page<PageData, PageMethods>({
           dealCards.push({
             id: id++,
             isMe: s.isMe,
-            toTop: s.top,
-            toLeft: s.left,
+            dx: s.dx,
+            dy: s.dy,
             delay: (round * orderedSeats.length + i) * DEAL_STAGGER_MS,
           });
         });
@@ -457,21 +537,115 @@ Page<PageData, PageMethods>({
     const isMyTurnFinal = !table.ended && isMyTurn;
     const HAND_ACTIVE_STAGES: GameStage[] = ['preflop', 'flop', 'turn', 'river', 'showdown'];
     const handInProgress = HAND_ACTIVE_STAGES.indexOf(table.stage) >= 0;
+    const canCheck = callAmount === 0;
 
-    this.setData({
-      table,
-      myPlayer: me,
-      opponents,
-      myCardsView,
-      isMyTurn: isMyTurnFinal,
-      callAmount,
-      canCheck: callAmount === 0,
-      banner: '',
-      endingHint,
-      newCommunityIndices: newIdx.length ? newIdx : this.data.newCommunityIndices,
-      handInProgress,
-      myHandRank,
-    });
+    // Build a path-syntax patch instead of one monolithic setData. On every
+    // wire update most fields are unchanged — sending only the diff keeps the
+    // JSBridge payload at tens of bytes instead of the kb-scale opponents
+    // array. Opponents diff per index per field; the seat component re-renders
+    // only when its actual data changes.
+    const patch: Record<string, unknown> = {};
+    const prevTbl = this.data.table;
+    if (!prevTbl) {
+      patch.table = table;
+    } else {
+      if (prevTbl.stage !== table.stage) patch['table.stage'] = table.stage;
+      if (prevTbl.pot !== table.pot) patch['table.pot'] = table.pot;
+      if (prevTbl.currentBet !== table.currentBet) patch['table.currentBet'] = table.currentBet;
+      if (prevTbl.activeSeat !== table.activeSeat) patch['table.activeSeat'] = table.activeSeat;
+      if (prevTbl.revealedCount !== table.revealedCount) patch['table.revealedCount'] = table.revealedCount;
+      if (prevTbl.minRaise !== table.minRaise) patch['table.minRaise'] = table.minRaise;
+      if (prevTbl.endsAt !== table.endsAt) patch['table.endsAt'] = table.endsAt;
+      if (prevTbl.ended !== table.ended) patch['table.ended'] = table.ended;
+      if (prevTbl.endPending !== table.endPending) patch['table.endPending'] = table.endPending;
+      if (prevTbl.actionDeadline !== table.actionDeadline) patch['table.actionDeadline'] = table.actionDeadline;
+      if (prevTbl.smallBlind !== table.smallBlind) patch['table.smallBlind'] = table.smallBlind;
+      if (prevTbl.bigBlind !== table.bigBlind) patch['table.bigBlind'] = table.bigBlind;
+      if (prevTbl.maxSeats !== table.maxSeats) patch['table.maxSeats'] = table.maxSeats;
+      if (prevTbl.roomId !== table.roomId) patch['table.roomId'] = table.roomId;
+      if (!shallowCardsEqual(prevTbl.communityCards, table.communityCards)) {
+        patch['table.communityCards'] = table.communityCards;
+      }
+    }
+
+    const prevOpps = this.data.opponents;
+    if (prevOpps.length !== opponents.length) {
+      patch.opponents = opponents;
+    } else {
+      for (let i = 0; i < opponents.length; i++) {
+        const oldP = prevOpps[i];
+        const newP = opponents[i];
+        if (!oldP || oldP.uid !== newP.uid || oldP.posKey !== newP.posKey) {
+          patch[`opponents[${i}]`] = newP;
+          continue;
+        }
+        if (oldP.chips !== newP.chips) patch[`opponents[${i}].chips`] = newP.chips;
+        if (oldP.betThisRound !== newP.betThisRound) patch[`opponents[${i}].betThisRound`] = newP.betThisRound;
+        if (oldP.status !== newP.status) patch[`opponents[${i}].status`] = newP.status;
+        if (oldP.isDealer !== newP.isDealer) patch[`opponents[${i}].isDealer`] = newP.isDealer;
+        if (oldP.isSmallBlind !== newP.isSmallBlind) patch[`opponents[${i}].isSmallBlind`] = newP.isSmallBlind;
+        if (oldP.isBigBlind !== newP.isBigBlind) patch[`opponents[${i}].isBigBlind`] = newP.isBigBlind;
+        if (oldP.isUTG !== newP.isUTG) patch[`opponents[${i}].isUTG`] = newP.isUTG;
+        if (oldP.handRank !== newP.handRank) patch[`opponents[${i}].handRank`] = newP.handRank;
+        if (oldP.nickname !== newP.nickname) patch[`opponents[${i}].nickname`] = newP.nickname;
+        if (oldP.avatar !== newP.avatar) patch[`opponents[${i}].avatar`] = newP.avatar;
+        if (oldP.avatarIsUrl !== newP.avatarIsUrl) patch[`opponents[${i}].avatarIsUrl`] = newP.avatarIsUrl;
+        if (oldP.rebuyCount !== newP.rebuyCount) patch[`opponents[${i}].rebuyCount`] = newP.rebuyCount;
+        if (!shallowCardsEqual(oldP.holeCards, newP.holeCards)) {
+          patch[`opponents[${i}].holeCards`] = newP.holeCards;
+        }
+      }
+    }
+
+    const prevMe = this.data.myPlayer;
+    if (!me) {
+      if (prevMe) patch.myPlayer = null;
+    } else if (!prevMe) {
+      patch.myPlayer = me;
+    } else {
+      if (prevMe.chips !== me.chips) patch['myPlayer.chips'] = me.chips;
+      if (prevMe.betThisRound !== me.betThisRound) patch['myPlayer.betThisRound'] = me.betThisRound;
+      if (prevMe.status !== me.status) patch['myPlayer.status'] = me.status;
+      if (prevMe.isDealer !== me.isDealer) patch['myPlayer.isDealer'] = me.isDealer;
+      if (prevMe.isSmallBlind !== me.isSmallBlind) patch['myPlayer.isSmallBlind'] = me.isSmallBlind;
+      if (prevMe.isBigBlind !== me.isBigBlind) patch['myPlayer.isBigBlind'] = me.isBigBlind;
+      if (prevMe.isUTG !== me.isUTG) patch['myPlayer.isUTG'] = me.isUTG;
+      if (prevMe.nickname !== me.nickname) patch['myPlayer.nickname'] = me.nickname;
+      if (prevMe.avatar !== me.avatar) patch['myPlayer.avatar'] = me.avatar;
+      if (prevMe.avatarIsUrl !== me.avatarIsUrl) patch['myPlayer.avatarIsUrl'] = me.avatarIsUrl;
+      if (prevMe.rebuyCount !== me.rebuyCount) patch['myPlayer.rebuyCount'] = me.rebuyCount;
+      if (!shallowCardsEqual(prevMe.holeCards, me.holeCards)) {
+        patch['myPlayer.holeCards'] = me.holeCards;
+      }
+    }
+
+    const prevCardsView = this.data.myCardsView;
+    if (prevCardsView.length !== myCardsView.length) {
+      patch.myCardsView = myCardsView;
+    } else {
+      for (let i = 0; i < myCardsView.length; i++) {
+        if (
+          prevCardsView[i].suit !== myCardsView[i].suit ||
+          prevCardsView[i].rank !== myCardsView[i].rank
+        ) {
+          patch.myCardsView = myCardsView;
+          break;
+        }
+      }
+    }
+
+    if (this.data.isMyTurn !== isMyTurnFinal) patch.isMyTurn = isMyTurnFinal;
+    if (this.data.callAmount !== callAmount) patch.callAmount = callAmount;
+    if (this.data.canCheck !== canCheck) patch.canCheck = canCheck;
+    if (this.data.banner !== '') patch.banner = '';
+    if (this.data.endingHint !== endingHint) patch.endingHint = endingHint;
+    if (this.data.handInProgress !== handInProgress) patch.handInProgress = handInProgress;
+    if (this.data.myHandRank !== myHandRank) patch.myHandRank = myHandRank;
+    const stageLabel = STAGE_LABEL[table.stage] ?? table.stage;
+    if (this.data.stageLabel !== stageLabel) patch.stageLabel = stageLabel;
+    if (newIdx.length) patch.newCommunityIndices = newIdx;
+
+    if (Object.keys(patch).length > 0) this.setData(patch);
   },
 
   openSettlement(players: PlayerSettlement[]) {
@@ -574,34 +748,84 @@ Page<PageData, PageMethods>({
     }
   },
 
+  // Measure the felt's actual pixel size + cache pixel offsets from the felt
+  // centre to each opponent seat anchor. Run once on page-ready (fire-and-
+  // forget); used by deal-card/chip-fly animations so their keyframes can stay
+  // on the compositor instead of animating top/left.
+  measureFelt() {
+    const q = wx.createSelectorQuery().in(this);
+    q.select('.felt').boundingClientRect();
+    q.exec((res: WechatMiniprogram.NodeInfo[]) => {
+      const rect = res && res[0];
+      if (!rect || !rect.width || !rect.height) return;
+      const seatOffsets: Record<number, { dx: number; dy: number }> = {};
+      Object.entries(OPPONENT_POSITIONS_9).forEach(([k, pos]) => {
+        const tx = (parseFloat(pos.left) / 100) * rect.width;
+        const ty = (parseFloat(pos.top) / 100) * rect.height;
+        seatOffsets[Number(k)] = {
+          dx: tx - rect.width / 2,
+          dy: ty - rect.height / 2,
+        };
+      });
+      // "me" zone sits below the felt; rough px estimate from the legacy 110%.
+      const meOffsetY = rect.height * 0.6;
+      feltGeom = { width: rect.width, height: rect.height, seatOffsets, meOffsetY };
+    });
+  },
+
+  // Returns pixel offset from felt centre for a given posKey. Falls back to a
+  // window-size estimate when the felt hasn't been measured yet (e.g. very
+  // first hand of the session before onReady's measurement completes).
+  getSeatOffsetPx(posKey: number): { dx: number; dy: number } {
+    if (feltGeom) {
+      return feltGeom.seatOffsets[posKey] ?? { dx: 0, dy: 0 };
+    }
+    const sys = store.getSystemInfo();
+    const ww = sys?.windowWidth ?? 375;
+    const wh = sys?.windowHeight ?? 667;
+    const fw = ww * 0.92;
+    const fh = (wh - 160) * 0.55; // very rough: page minus topbar/me-zone/action
+    const pos = OPPONENT_POSITIONS_9[posKey];
+    if (!pos) return { dx: 0, dy: 0 };
+    return {
+      dx: (parseFloat(pos.left) / 100) * fw - fw / 2,
+      dy: (parseFloat(pos.top) / 100) * fh - fh / 2,
+    };
+  },
+
+  // Pixel offset from felt centre to the me-zone anchor (below the felt).
+  getMeOffsetPx(): { dx: number; dy: number } {
+    if (feltGeom) return { dx: 0, dy: feltGeom.meOffsetY };
+    const sys = store.getSystemInfo();
+    const wh = sys?.windowHeight ?? 667;
+    return { dx: 0, dy: (wh - 160) * 0.33 };
+  },
+
   flyPotToSeat(seatNumber: number, amount: number) {
     const me = this.data.myPlayer;
     if (!me || !this.data.table) return;
     const isMe = seatNumber === me.seat;
-    let toTop = '95%';
-    let toLeft = '50%';
-    if (!isMe) {
-      const posKey = (seatNumber - me.seat + this.data.table.maxSeats) % this.data.table.maxSeats;
-      const pos = OPPONENT_POSITIONS_9[posKey];
-      if (pos) {
-        toTop = pos.top;
-        toLeft = pos.left;
-      }
-    }
+    const off = isMe
+      ? this.getMeOffsetPx()
+      : this.getSeatOffsetPx((seatNumber - me.seat + this.data.table.maxSeats) % this.data.table.maxSeats);
     const id = ++chipFlyIdSeq;
     const fly: ChipFly = {
       id,
-      fromTop: '50%',
-      fromLeft: '50%',
-      toTop,
-      toLeft,
+      fromX: 0,
+      fromY: 0,
+      toX: off.dx,
+      toY: off.dy,
       amount,
+      hidden: false,
     };
-    this.setData({ chipFlies: [...this.data.chipFlies, fly] });
+    const idx = this.data.chipFlies.length;
+    this.setData({ [`chipFlies[${idx}]`]: fly });
     setTimeout(() => {
-      this.setData({
-        chipFlies: this.data.chipFlies.filter((c) => c.id !== id),
-      });
+      const cur = this.data.chipFlies;
+      const at = cur.findIndex((c) => c.id === id);
+      if (at >= 0 && !cur[at].hidden) {
+        this.setData({ [`chipFlies[${at}].hidden`]: true });
+      }
     }, 750);
   },
 
@@ -609,35 +833,27 @@ Page<PageData, PageMethods>({
     const me = this.data.myPlayer;
     if (!me || !this.data.table) return;
     const isMe = seatNumber === me.seat;
-    let fromTop = '50%';
-    let fromLeft = '50%';
-    if (isMe) {
-      // me-zone is below the felt; chips originate from somewhere near the bottom
-      fromTop = '95%';
-      fromLeft = '50%';
-    } else {
-      const posKey = (seatNumber - me.seat + this.data.table.maxSeats) % this.data.table.maxSeats;
-      const pos = OPPONENT_POSITIONS_9[posKey];
-      if (pos) {
-        fromTop = pos.top;
-        fromLeft = pos.left;
-      }
-    }
+    const off = isMe
+      ? this.getMeOffsetPx()
+      : this.getSeatOffsetPx((seatNumber - me.seat + this.data.table.maxSeats) % this.data.table.maxSeats);
     const id = ++chipFlyIdSeq;
     const fly: ChipFly = {
       id,
-      fromTop,
-      fromLeft,
-      toTop: '50%',
-      toLeft: '50%',
+      fromX: off.dx,
+      fromY: off.dy,
+      toX: 0,
+      toY: 0,
       amount,
+      hidden: false,
     };
-    this.setData({ chipFlies: [...this.data.chipFlies, fly] });
-    // Cleanup after animation
+    const idx = this.data.chipFlies.length;
+    this.setData({ [`chipFlies[${idx}]`]: fly });
     setTimeout(() => {
-      this.setData({
-        chipFlies: this.data.chipFlies.filter((c) => c.id !== id),
-      });
+      const cur = this.data.chipFlies;
+      const at = cur.findIndex((c) => c.id === id);
+      if (at >= 0 && !cur[at].hidden) {
+        this.setData({ [`chipFlies[${at}].hidden`]: true });
+      }
     }, 700);
   },
 
@@ -661,12 +877,15 @@ Page<PageData, PageMethods>({
       }
     }
     const id = ++winBubbleIdSeq;
-    const bubble: WinBubble = { id, seat: seatNumber, top, left, amount };
-    this.setData({ winBubbles: [...this.data.winBubbles, bubble] });
+    const bubble: WinBubble = { id, seat: seatNumber, top, left, amount, hidden: false };
+    const idx = this.data.winBubbles.length;
+    this.setData({ [`winBubbles[${idx}]`]: bubble });
     setTimeout(() => {
-      this.setData({
-        winBubbles: this.data.winBubbles.filter((b) => b.id !== id),
-      });
+      const cur = this.data.winBubbles;
+      const at = cur.findIndex((b) => b.id === id);
+      if (at >= 0 && !cur[at].hidden) {
+        this.setData({ [`winBubbles[${at}].hidden`]: true });
+      }
     }, 1900);
   },
 
@@ -689,12 +908,15 @@ Page<PageData, PageMethods>({
       }
     }
     const id = ++chatBubbleIdSeq;
-    const bubble: ChatBubble = { id, seat: payload.seat, top, left, emoji: payload.emoji };
-    this.setData({ chatBubbles: [...this.data.chatBubbles, bubble] });
+    const bubble: ChatBubble = { id, seat: payload.seat, top, left, emoji: payload.emoji, hidden: false };
+    const idx = this.data.chatBubbles.length;
+    this.setData({ [`chatBubbles[${idx}]`]: bubble });
     setTimeout(() => {
-      this.setData({
-        chatBubbles: this.data.chatBubbles.filter((b) => b.id !== id),
-      });
+      const cur = this.data.chatBubbles;
+      const at = cur.findIndex((b) => b.id === id);
+      if (at >= 0 && !cur[at].hidden) {
+        this.setData({ [`chatBubbles[${at}].hidden`]: true });
+      }
     }, 2200);
   },
 

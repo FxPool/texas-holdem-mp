@@ -32,7 +32,7 @@
   </view>
 
   <block wx:if="{{table}}">
-    <view class="stage-tag">{{table.stage}}</view>
+    <view class="stage-tag">{{stageLabel}}</view>
 
     <view class="table-zone">
       <view class="felt">
@@ -66,12 +66,13 @@
           </view>
         </block>
 
-        <!-- 发牌动画层：从中央依次飞向每个座位（两轮，每轮一张） -->
+        <!-- 发牌动画层：从中央依次飞向每个座位（两轮，每轮一张）。
+             dx/dy 是 felt 中心到目标的像素偏移，让 keyframe 只动 transform。 -->
         <block wx:if="{{isDealing}}">
           <block wx:for="{{dealCards}}" wx:key="id" wx:for-item="dc">
             <view
               class="deal-card {{dc.isMe ? 'deal-to-me' : 'deal-to-pos'}}"
-              style="animation-delay: {{dc.delay}}ms; --target-top: {{dc.toTop}}; --target-left: {{dc.toLeft}};"
+              style="animation-delay: {{dc.delay}}ms; --dx: {{dc.dx}}px; --dy: {{dc.dy}}px;"
             ></view>
           </block>
         </block>
@@ -80,7 +81,8 @@
         <block wx:for="{{chipFlies}}" wx:key="id" wx:for-item="fly">
           <view
             class="chip-fly"
-            style="--from-top: {{fly.fromTop}}; --from-left: {{fly.fromLeft}}; --to-top: {{fly.toTop}}; --to-left: {{fly.toLeft}};"
+            hidden="{{fly.hidden}}"
+            style="--from-x: {{fly.fromX}}px; --from-y: {{fly.fromY}}px; --to-x: {{fly.toX}}px; --to-y: {{fly.toY}}px;"
           >
             <view class="chip-disc"></view>
             <text class="chip-amount">{{fly.amount}}</text>
@@ -89,14 +91,14 @@
 
         <!-- 聊天表情气泡 -->
         <block wx:for="{{chatBubbles}}" wx:key="id" wx:for-item="bubble">
-          <view class="chat-bubble" style="top: {{bubble.top}}; left: {{bubble.left}};">
+          <view class="chat-bubble" hidden="{{bubble.hidden}}" style="top: {{bubble.top}}; left: {{bubble.left}};">
             <text class="chat-bubble-emoji">{{bubble.emoji}}</text>
           </view>
         </block>
 
         <!-- 赢家盈利浮动数字 -->
         <block wx:for="{{winBubbles}}" wx:key="id" wx:for-item="win">
-          <view class="win-bubble" style="top: {{win.top}}; left: {{win.left}};">+{{win.amount}}</view>
+          <view class="win-bubble" hidden="{{win.hidden}}" style="top: {{win.top}}; left: {{win.left}};">+{{win.amount}}</view>
         </block>
       </view>
     </view>

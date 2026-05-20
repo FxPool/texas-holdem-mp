@@ -44,7 +44,7 @@
 
   <!-- 状态徽章 -->
   <view wx:if="{{player.status === 'folded'}}" class="state-tag tag-fold">弃</view>
-  <view wx:if="{{player.status === 'all-in'}}" class="state-tag tag-allin">All-In</view>
+  <view wx:if="{{player.status === 'all-in'}}" class="state-tag tag-allin">全下</view>
   <view wx:if="{{player.status === 'thinking'}}" class="state-tag tag-think">行动中</view>
 
   <!-- 当前轮押注 -->

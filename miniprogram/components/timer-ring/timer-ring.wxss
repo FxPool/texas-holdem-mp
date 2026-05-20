@@ -4,11 +4,23 @@
   pointer-events: none;
 }
 
+/* conic-gradient 的角度通过 keyframe 从 360deg 退到 0deg。
+   animation-delay 设为负的"已用时长",让动画从中途开始,GPU 自动推进,
+   不再依赖 JS 200ms 周期 setData 写 inline style。 */
 .ring {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  transition: background 0.2s linear;
+  background: conic-gradient(#FFD66B 360deg, rgba(255, 246, 224, 0.15) 0deg);
+}
+
+.ring-anim {
+  animation: ring-deplete var(--total, 30000ms) linear var(--elapsed, 0ms) forwards;
+}
+
+@keyframes ring-deplete {
+  0%   { background: conic-gradient(#FFD66B 360deg, rgba(255, 246, 224, 0.15) 0deg); }
+  100% { background: conic-gradient(#FFD66B 0deg,   rgba(255, 246, 224, 0.15) 0deg); }
 }
 
 .ring-inner {

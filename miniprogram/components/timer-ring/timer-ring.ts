@@ -1,3 +1,12 @@
+// Action-deadline ring around the active seat. The progress shrinks from
+// full → empty over `duration` seconds.
+//
+// The timer-ring is mounted via `wx:if="{{isActive}}"` on the seat, so a fresh
+// CSS animation kicks off every time the active player changes — no manual
+// restart needed. Previously this component ran a 200ms setInterval that
+// rewrote the inline conic-gradient on every tick (~5×/sec setData + bridge
+// round-trip). Now setData runs once per turn (when `deadline` becomes known)
+// and the GPU advances the keyframe between ticks.
 Component({
   options: { styleIsolation: 'isolated' },
   properties: {
@@ -5,45 +14,24 @@ Component({
     duration: { type: Number, value: 30 }, // 总时长秒
   },
   data: {
-    progress: 1, // 1 -> 0
-    secondsLeft: 30,
-  },
-  lifetimes: {
-    attached() {
-      this.startTick();
-    },
-    detached() {
-      this.stopTick();
-    },
+    totalMs: 0,
+    // Negative value passed to CSS as animation-delay so the keyframe starts
+    // mid-way through (matching how much of the timer has already elapsed).
+    elapsedMs: 0,
   },
   observers: {
-    'deadline': function () {
-      this.startTick();
-    },
-  },
-  methods: {
-    startTick() {
-      this.stopTick();
-      const update = () => {
-        const now = Date.now();
-        const remainMs = Math.max(0, this.data.deadline - now);
-        const totalMs = this.data.duration * 1000;
-        const progress = totalMs > 0 ? Math.min(1, remainMs / totalMs) : 0;
-        this.setData({
-          progress,
-          secondsLeft: Math.ceil(remainMs / 1000),
-        });
-        if (remainMs <= 0) this.stopTick();
-      };
-      update();
-      // @ts-ignore
-      this._timer = setInterval(update, 200);
-    },
-    stopTick() {
-      // @ts-ignore
-      if (this._timer) clearInterval(this._timer);
-      // @ts-ignore
-      this._timer = null;
+    'deadline,duration': function (deadline: number, duration: number) {
+      if (!deadline || !duration) {
+        if (this.data.totalMs !== 0) this.setData({ totalMs: 0, elapsedMs: 0 });
+        return;
+      }
+      const totalMs = duration * 1000;
+      const remainMs = Math.max(0, deadline - Date.now());
+      const elapsedMs = Math.max(0, totalMs - remainMs);
+      if (this.data.totalMs !== totalMs || this.data.elapsedMs !== elapsedMs) {
+        this.setData({ totalMs, elapsedMs });
+      }
     },
   },
 });
+

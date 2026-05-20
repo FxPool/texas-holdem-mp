@@ -42,14 +42,13 @@
   transform: translateX(-16rpx) rotate(12deg);
 }
 
-/* 摊牌时正面状态下让两张牌更分开、更立体 */
+/* 摊牌时正面状态下让两张牌更分开、更立体。card-face 自带 box-shadow,
+   不再叠 filter: drop-shadow（离屏缓冲开销大）。 */
 .holecards.is-revealed .hc-1 {
   transform: translateX(8rpx) rotate(-8deg);
-  filter: drop-shadow(0 4rpx 8rpx rgba(0,0,0,0.45));
 }
 .holecards.is-revealed .hc-2 {
   transform: translateX(-8rpx) rotate(8deg);
-  filter: drop-shadow(0 4rpx 8rpx rgba(0,0,0,0.45));
 }
 
 /* 中文牌型标签：贴在两张牌中间下方 */
