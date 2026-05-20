@@ -36,7 +36,7 @@ LIMITS_FILE="/etc/security/limits.d/texas-holdem.conf"
 CADDYFILE="/etc/caddy/Caddyfile"
 LISTEN_ADDR="127.0.0.1:18080"
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 BUILD="2026-05-09"
 
 # ─── Colors ───────────────────────────────────────────────────────
