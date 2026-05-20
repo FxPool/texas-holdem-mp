@@ -13,21 +13,26 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 每个 slot 永久占一个合成层 + will-change,首张牌翻入时不再有
+     建层成本。5 个 slot 总开销可忽略,但能消除首帧 hitch。 */
+  transform: translateZ(0);
   backface-visibility: hidden;
+  will-change: transform, opacity;
+  contain: layout paint;
 }
 
-/* Per-card flip-in: a single card scales up + tilts as it lands.
-   `both` fill-mode applies the 0% (hidden) state during animation-delay,
-   so staggered cards in a flop stay invisible until their turn. */
+/* Per-card flip-in: 2D drop + scale。旧版本用 rotateY(180deg) 但父级
+   没有 perspective,前半段动画其实只是不可见的 scaleX,白白消耗 GPU。
+   现在改成「从上方落下并放大」,纯 transform + opacity,触发不了
+   layout/paint,在中低端机上明显平滑很多。`both` fill-mode 让带
+   animation-delay 的多张 flop 牌在等待时保持隐藏状态。 */
 .slot.is-flipping {
-  animation: card-flip-in 0.55s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  animation: card-flip-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
   transform-origin: center;
-  will-change: transform, opacity;
 }
 
 @keyframes card-flip-in {
-  0%   { transform: rotateY(180deg) scale(0.5); opacity: 0; }
-  35%  { opacity: 1; }
-  60%  { transform: rotateY(-12deg) scale(1.08); }
-  100% { transform: rotateY(0deg) scale(1); opacity: 1; }
+  0%   { transform: translateY(-32rpx) scale(0.7); opacity: 0; }
+  60%  { opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
 }
